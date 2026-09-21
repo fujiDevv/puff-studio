@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+
 import { connect, launchChrome, sleep } from "./cdp.mjs";
 import { anyFile, pngFile, SVG_MARK } from "./test-image.mjs";
 
@@ -520,6 +522,259 @@ async function main() {
       "the sample marks cover real pixels when drawn on their own",
       sampleInk.count > 0 && sampleInk.worst > 0.01,
       `${sampleInk.count} marks rasterized, worst ink ${sampleInk.worst.toFixed(4)}`,
+    );
+
+    /* ----------------------------------------------------------------- seo */
+
+    // Read the identity out of `lib/site.ts` rather than restating it here.
+    // Restating it would be a second copy of the domain, and the interesting
+    // question is not "is the domain X" but "does the head agree with the file
+    // that claims to define it" — which is the invariant that actually rots.
+    const siteSource = await readFile(
+      new URL("../lib/site.ts", import.meta.url),
+      "utf8",
+    );
+    const declared = (name) => {
+      const match = siteSource.match(
+        new RegExp(`${name}:[\\s\\S]{0,40}?"([^"]+)"`),
+      );
+      if (!match) throw new Error(`lib/site.ts declares no ${name}`);
+      return match[1];
+    };
+    const ORIGIN = declared("url");
+    const BRAND_NAME = declared("name");
+    const BRAND_TITLE = declared("title");
+    const BRAND_DESCRIPTION = declared("description");
+
+    const head = await cdp.evaluate(`(() => {
+        const meta = (sel) => document.querySelector(sel)?.getAttribute('content') ?? null;
+        const link = (sel) => document.querySelector(sel)?.getAttribute('href') ?? null;
+        return {
+          title: document.title,
+          description: meta('meta[name="description"]'),
+          canonical: link('link[rel="canonical"]'),
+          robots: meta('meta[name="robots"]'),
+          og: {
+            type: meta('meta[property="og:type"]'),
+            siteName: meta('meta[property="og:site_name"]'),
+            title: meta('meta[property="og:title"]'),
+            description: meta('meta[property="og:description"]'),
+            url: meta('meta[property="og:url"]'),
+            image: meta('meta[property="og:image"]'),
+            imageWidth: meta('meta[property="og:image:width"]'),
+            imageHeight: meta('meta[property="og:image:height"]'),
+            imageAlt: meta('meta[property="og:image:alt"]'),
+          },
+          twitter: {
+            card: meta('meta[name="twitter:card"]'),
+            image: meta('meta[name="twitter:image"]'),
+          },
+          icons: [...document.querySelectorAll('link[rel="icon"], link[rel="shortcut icon"], link[rel="apple-touch-icon"]')]
+            .map((n) => ({
+              rel: n.getAttribute('rel'),
+              href: n.getAttribute('href'),
+              type: n.getAttribute('type'),
+              sizes: n.getAttribute('sizes'),
+            })),
+        };
+      })()`);
+
+    // The brand appears once. It used to appear twice on the homepage, because
+    // the page set a title that already contained it and the root layout's
+    // template appended `· Puff Studio` to it — a head that reads fine at a
+    // glance and is wrong in a browser tab, a bookmark and every search result.
+    const brandMentions = (head.title.match(new RegExp(BRAND_NAME, "g")) ?? [])
+      .length;
+    record(
+      "the homepage title names the brand exactly once",
+      head.title === BRAND_TITLE && brandMentions === 1,
+      `"${head.title}" · ${brandMentions} mention(s)`,
+    );
+
+    // The trailing slash is dropped from a root URL by the framework, so
+    // `https://host/` comes back as `https://host`. Both address the same
+    // document and the sitemap lists the slash-free form, so the check compares
+    // them without it rather than pinning a form the router decides.
+    const withoutSlash = (url) => (url ?? "").replace(/\/$/, "");
+
+    record(
+      "the head declares a canonical URL at the real origin",
+      withoutSlash(head.canonical) === ORIGIN,
+      head.canonical ?? "no <link rel=\"canonical\">",
+    );
+
+    record(
+      "the description is the one lib/site.ts declares",
+      head.description === BRAND_DESCRIPTION,
+      `${head.description?.length ?? 0} chars of ${BRAND_DESCRIPTION.length}`,
+    );
+
+    // Relative URLs resolving to absolute ones is the whole job of
+    // `metadataBase`, and the failure is silent: a relative `og:image` still
+    // renders, against whatever host fetched the page — including a preview
+    // deploy's own hostname.
+    record(
+      "the social card is absolute, sized and described",
+      head.og.image === `${ORIGIN}/og.png` &&
+        head.og.imageWidth === "1200" &&
+        head.og.imageHeight === "630" &&
+        Boolean(head.og.imageAlt),
+      `${head.og.image} ${head.og.imageWidth}x${head.og.imageHeight}`,
+    );
+
+    record(
+      "og:url and the Twitter card agree with the canonical",
+      withoutSlash(head.og.url) === ORIGIN &&
+        head.twitter.card === "summary_large_image" &&
+        head.twitter.image === `${ORIGIN}/og.png` &&
+        head.og.siteName === BRAND_NAME &&
+        head.og.type === "website",
+      `og:url ${head.og.url} · card ${head.twitter.card}`,
+    );
+
+    record(
+      "the crawler directives allow indexing",
+      (head.robots ?? "").includes("index") &&
+        !(head.robots ?? "").includes("noindex"),
+      head.robots ?? "no <meta name=\"robots\">",
+    );
+
+    // Four icon forms, because four consumers ask for different things: the SVG
+    // for anywhere that scales, the PNGs for an installable app, the `.ico` for
+    // the tab, and a squared touch icon for iOS. The expected size is read from
+    // the `sizes` attribute the head itself declares, so this checks the *link*
+    // and the *file* agree rather than comparing two hand-written lists.
+    // Deduped: `favicon.ico` is declared twice on purpose — once as an icon with
+    // its three sizes, once as `shortcut` — and the same file listed twice is not
+    // two files.
+    const iconUrls = [...new Set(head.icons.map((icon) => icon.href))];
+    const expectedSize = Object.fromEntries(
+      head.icons
+        .filter((icon) => icon.sizes && /^\d+x\d+$/.test(icon.sizes))
+        .map((icon) => [icon.href, Number(icon.sizes.split("x")[0])]),
+    );
+
+    const decoded = await cdp.evaluate(`(async () => {
+        const want = ${JSON.stringify(iconUrls.concat(["/og.png"]))};
+        const out = {};
+        for (const path of want) {
+          out[path] = await new Promise((done) => {
+            const img = new Image();
+            img.onload = () => done({ w: img.naturalWidth, h: img.naturalHeight });
+            img.onerror = () => done(null);
+            img.src = path;
+          });
+        }
+        return out;
+      })()`);
+
+    const wrongSize = head.icons
+      .filter((icon, i) => head.icons.findIndex((o) => o.href === icon.href) === i)
+      .filter((icon) => {
+        const size = expectedSize[icon.href];
+        const seen = decoded[icon.href];
+        return !seen || (size && (seen.w !== size || seen.h !== size));
+      });
+    record(
+      "every declared icon is a file that decodes at the size it claims",
+      head.icons.length >= 4 && wrongSize.length === 0,
+      head.icons
+        .map((icon) => {
+          const seen = decoded[icon.href];
+          return `${icon.href} ${seen ? `${seen.w}x${seen.h}` : "MISSING"}`;
+        })
+        .join(" · "),
+    );
+
+    record(
+      "the social card decodes at the size og:image advertises",
+      decoded["/og.png"]?.w === 1200 && decoded["/og.png"]?.h === 630,
+      decoded["/og.png"]
+        ? `${decoded["/og.png"].w}x${decoded["/og.png"].h}`
+        : "did not load",
+    );
+
+    record(
+      "an apple-touch-icon is declared",
+      head.icons.some((icon) => icon.rel === "apple-touch-icon"),
+      head.icons.filter((i) => i.rel === "apple-touch-icon").map((i) => i.href).join(", ") ||
+        "none",
+    );
+
+    // The route files, fetched rather than assumed. A `robots.txt` serving an
+    // empty body with a 200 is exactly the shape a broken one takes, so the
+    // content is what is asserted.
+    const fetched = {};
+    for (const path of [
+      "/robots.txt",
+      "/sitemap.xml",
+      "/manifest.webmanifest",
+    ]) {
+      const res = await fetch(`${BASE}${path}`);
+      fetched[path] = {
+        status: res.status,
+        type: (res.headers.get("content-type") ?? "").split(";")[0],
+        body: await res.text(),
+      };
+    }
+
+    const robots = fetched["/robots.txt"];
+    const sitemap = fetched["/sitemap.xml"];
+    const manifest = fetched["/manifest.webmanifest"];
+
+    record(
+      "robots.txt points crawlers at the sitemap",
+      robots.status === 200 &&
+        robots.body.includes(`Sitemap: ${ORIGIN}/sitemap.xml`),
+      `${robots.status} ${robots.type} · ${robots.body.split("\n").length} lines`,
+    );
+
+    record(
+      "the sitemap lists both routes at the real origin",
+      sitemap.status === 200 &&
+        sitemap.body.includes(`${ORIGIN}</loc>`) &&
+        sitemap.body.includes(`${ORIGIN}/studio</loc>`),
+      `${sitemap.status} ${sitemap.type}`,
+    );
+
+    // Parsed, not grepped: the icons list is the part that matters, and one that
+    // names a file which does not exist is invisible in the JSON.
+    let manifestIcons = [];
+    try {
+      manifestIcons = JSON.parse(manifest.body).icons ?? [];
+    } catch {
+      /* recorded below */
+    }
+    const manifestOk = await Promise.all(
+      manifestIcons.map(async (icon) => {
+        const res = await fetch(`${BASE}${icon.src}`);
+        return res.status === 200 && res.headers.get("content-type")?.startsWith("image/");
+      }),
+    );
+    record(
+      "the web manifest names icons that are actually served",
+      manifest.status === 200 &&
+        manifestIcons.length >= 3 &&
+        manifestIcons.every((_, i) => manifestOk[i]) &&
+        JSON.parse(manifest.body).start_url === "/studio",
+      `${manifestIcons.length} icons · ${manifestIcons.map((i) => i.src).join(", ")}`,
+    );
+
+    // The studio sets its own title in `app/studio/layout.tsx`, because its page
+    // is a client component and cannot export metadata. Without it both routes
+    // shared the homepage's `title.default`, so a search result for the studio
+    // read as the landing page.
+    const studioHtml = await (await fetch(`${BASE}/studio`)).text();
+    const studioTitle = studioHtml.match(/<title>([^<]*)<\/title>/)?.[1] ?? "";
+    const studioMentions = (
+      studioTitle.match(new RegExp(BRAND_NAME, "g")) ?? []
+    ).length;
+    record(
+      "the studio route names itself once, and not as the homepage",
+      studioTitle === `Studio · ${BRAND_NAME}` &&
+        studioMentions === 1 &&
+        studioTitle !== BRAND_TITLE,
+      `"${studioTitle}"`,
     );
 
     /* ------------------------------------------------------------- studio */

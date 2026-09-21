@@ -44,6 +44,7 @@
     "deploy:response-store": "wrangler deploy --config wrangler.response-store.jsonc",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/**/*.test.mjs\"",
+    "assets": "node scripts/gen-brand-assets.mjs",
     "check:targets": "node scripts/check-targets.mjs",
     "check:browser": "node scripts/browser-check.mjs"
   }

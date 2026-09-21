@@ -289,13 +289,54 @@ canvas **and** applies the same fit the export uses, with the scale printed
 beside it — the difference between a guide that means something and a box the
 artwork visibly ignores.
 
+## Brand assets, and what a crawler sees
+
+Seven files describe one plate: the favicon (three sizes), an SVG icon, two
+manifest icons, a maskable one, an iOS touch icon and a 1200×630 social card.
+They are **generated, not drawn** — `pnpm assets` renders them from the same
+`lib/brand.ts` direction the landing header draws and the same `renderSvg` a
+user's export goes through, rasterized by the headless Chrome the target checks
+already drive (no `sharp`, no `resvg`).
+
+Regenerating is one command, so the icons cannot drift from the code that draws
+the logo beside them. The script also checks what it produced rather than
+trusting the render: every PNG is decoded back through a canvas, and it fails if
+a rounded icon is not transparent outside its curve, if a square one is not
+opaque into all four corners, or if the `.ico`'s directory disagrees with the
+payloads underneath it.
+
+| File | Size | Where it goes |
+| --- | --- | --- |
+| `favicon.ico` | 16, 32, 48 | The tab, the bookmark bar, Windows' medium icons — three PNGs in one `.ico`, built by hand |
+| `icon.svg` | vector | Everything that scales |
+| `icon-192.png`, `icon-512.png` | 192², 512² | The web manifest, `purpose: any` — the mark as designed, rounded |
+| `icon-maskable-512.png` | 512² | A launcher crops it to its own shape, so it is the square opaque master |
+| `apple-icon.png` | 180² | Square and opaque: iOS rejects a touch icon that carries alpha |
+| `og.png` | 1200×630 | Link previews. Composed as a page and screenshotted, so the text gets real shaping instead of being drawn as paths |
+
+`lib/site.ts` is the identity, and the head is the only place the domain is
+written: `metadataBase` turns the relative asset URLs (`/og.png`) into absolute
+ones, so a preview deploy cannot advertise its own hostname as the image.
+
+`/robots.txt`, `/sitemap.xml` and `/manifest.webmanifest` are routes
+(`app/robots.ts`, `app/sitemap.ts`, `app/manifest.ts`). Nothing is disallowed —
+the app has no private area, and the studio is the page that answers "app icon
+maker". The sitemap's real job is `/studio`, which has no inbound link from
+anywhere else on the web.
+
+**The title carries the brand once.** The root layout applies a `%s · Puff Studio`
+template, so a page that writes the brand into its own title gets it twice — the
+homepage did, and rendered "… designed not generated · Puff Studio" in a tab, a
+bookmark and every search result. Pages now set a bare name, or nothing at all.
+
 ## What the tests hold down
 
 ```
 pnpm typecheck        tsc --noEmit
 pnpm test             50 engine, look and sample tests
 pnpm check:targets    10 checks: the reference edge, alpha and safe areas
-pnpm check:browser    69 checks in headless Chrome (needs: pnpm dev)
+pnpm check:browser    82 checks in headless Chrome (needs: pnpm dev)
+pnpm assets           regenerates public/, with pixel checks on what it wrote
 pnpm build            Worker output
 ```
 
@@ -323,6 +364,15 @@ A few that exist because the failure they catch is invisible in source:
   other axis computes to `auto`, the row becomes a scroll container, and the lift
   is sheared off anyway. Asserted on the *computed* value, not the class, because a
   utility that compiles to nothing is a trap this codebase has already hit.
+- **`every declared icon is a file that decodes at the size it claims`**
+  (browser). The head and `public/` are two things that can disagree without
+  either looking wrong; the expected size comes from the `sizes` attribute the
+  head itself declares, so this compares the link against the file rather than
+  two hand-written lists. The favicon is the asset nobody looks at twice, which
+  is exactly why it is worth measuring.
+- **`the homepage title names the brand exactly once`** (browser). A title that
+  reads fine and is wrong in every place it is *reused* — a tab, a bookmark, a
+  search result — is what the doubled brand produced.
 - **`the corner is the reference's arc, and the rim follows it`** (targets). The
   plate's corner and its bevel are measured out of a real raster against
   `docs/Frame.svg`'s own numbers — 218.182, and a 7-wide band whose visible half is
@@ -495,7 +545,12 @@ A few that exist because the failure they catch is invisible in source:
 ## Layout
 
 ```
-app/page.tsx                 landing
+app/page.tsx                 landing (no metadata of its own — see app/layout.tsx)
+app/layout.tsx               the head: metadataBase, openGraph, icons, viewport
+app/studio/layout.tsx        the studio's head (its page is a client component)
+app/robots.ts                /robots.txt
+app/sitemap.ts               /sitemap.xml
+app/manifest.ts              /manifest.webmanifest
 app/studio/page.tsx          the two-column studio (?template=<id> preselects)
 components/marquee.tsx       the looping track, shared by the wall and the hero
 components/marketing/        landing sections, incl. the wall of finished plates
@@ -511,14 +566,18 @@ components/studio/size.tsx     the logo's size: readout, recipes, slider
 components/studio/position.tsx the offset: readout, nudge pad, recentre
 components/studio/export-panel.tsx the file set, inside the header's popover
 components/ui/popover.tsx    the anchored panel primitive (export)
+lib/site.ts                  the site identity: domain, title, description, keywords
+lib/brand.ts                 the brand plate, shared by the header and the generator
 lib/templates.ts             the look library — this app's "Stage A"
 lib/sample-marks.ts          the landing page's sample logos, as embedded vectors
 lib/store.ts                 the editing document
 lib/image.ts                 file → embedded data URL, in the browser, whole
 lib/mark-session.ts          the validated localStorage record: artwork + look
 lib/engine/                  vendored renderer, from puff-app
+public/                      the generated brand assets (see `pnpm assets`)
 scripts/                     cdp client + the verification scripts
 scripts/test-image.mjs       generated PNG fixtures for the checks
+scripts/gen-brand-assets.mjs favicon, icons and the social card, from the engine
 ```
 
 `lib/engine/` is a **vendored copy** of `puff-app`'s renderer — geometry,
