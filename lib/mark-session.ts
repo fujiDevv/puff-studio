@@ -1,4 +1,4 @@
-import { clampOffset } from "./engine/targets";
+import { clampOffset, clampScale } from "./engine/targets";
 import type { MarkArtwork, MarkOffset } from "./engine/types";
 import { TEMPLATES } from "./templates";
 
@@ -48,14 +48,32 @@ function readArtwork(value: unknown): MarkArtwork | null {
   if (typeof mark.name !== "string" || typeof mark.mime !== "string") return null;
   if (typeof mark.width !== "number" || typeof mark.height !== "number") return null;
   if (!Number.isFinite(mark.width) || !Number.isFinite(mark.height)) return null;
+  const scale = readScale(mark.scale);
+  const offset = readOffset(mark.offset, scale);
   return {
     href: mark.href,
     name: mark.name,
     mime: mark.mime,
     width: mark.width,
     height: mark.height,
-    offset: readOffset(mark.offset),
+    ...(offset ? { offset } : {}),
+    ...(scale !== 1 ? { scale } : {}),
   };
+}
+
+/**
+ * The stored size, or `1` for a mark that was never resized.
+ *
+ * Clamped rather than trusted, and the clamp is the important half: a stored
+ * `scale: 1e6` would be a logo whose box is a thousand canvases wide, so the
+ * offset clamp inside the renderer would collapse to zero and the export would be
+ * a single colour. Dropping it to the default instead would be worse than
+ * clamping — it would silently resize an image the user had deliberately made
+ * larger — so the value is brought back into range and kept.
+ */
+function readScale(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 1;
+  return clampScale(value);
 }
 
 /**
@@ -66,12 +84,14 @@ function readArtwork(value: unknown): MarkArtwork | null {
  * export could reach. A pair that is not two finite numbers is dropped whole —
  * a half-read position is worse than a centred one.
  */
-function readOffset(value: unknown): MarkOffset | undefined {
+function readOffset(value: unknown, scale: number): MarkOffset | undefined {
   if (!value || typeof value !== "object") return undefined;
   const { x, y } = value as Record<string, unknown>;
   if (typeof x !== "number" || typeof y !== "number") return undefined;
   if (!Number.isFinite(x) || !Number.isFinite(y)) return undefined;
-  return clampOffset({ x, y });
+  // Clamped against the stored scale, not the default one: a mark that was
+  // enlarged and then moved had less room to move, so the scale is read first.
+  return clampOffset({ x, y }, scale);
 }
 
 export function loadSessionMark(): SessionMark {

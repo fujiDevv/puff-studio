@@ -3,7 +3,7 @@
 import { create } from "zustand";
 
 import { paletteById } from "./engine/palettes";
-import { clampOffset, type ExportTarget } from "./engine/targets";
+import { clampOffset, clampScale, type ExportTarget } from "./engine/targets";
 import { MAX_RADIUS, type BgMode, type Direction, type Finish, type MarkArtwork, type MarkOffset, type Palette } from "./engine/types";
 import { TEMPLATES, templateById } from "./templates";
 
@@ -62,9 +62,15 @@ interface StudioState {
   setArtwork: (mark: MarkArtwork | null) => void;
   /**
    * Move the artwork on the plate. Ignored on an empty plate, and clamped to what
-   * the canvas allows — see `MARK_TRAVEL`.
+   * the canvas allows at the artwork's current size — see `markTravel`.
    */
   setArtworkOffset: (offset: MarkOffset) => void;
+  /**
+   * Resize the artwork about its own centre. Ignored on an empty plate. Also
+   * re-clamps the offset, because a larger box has less room to move and can
+   * otherwise be left hanging off the canvas by a drag made at the old size.
+   */
+  setArtworkScale: (scale: number) => void;
   setPaletteColor: (role: PaletteColorRole, hex: string) => void;
   /** Load a different look at random. */
   shuffle: () => void;
@@ -133,11 +139,38 @@ export const useStudio = create<StudioState>()((set) => ({
         ? {
             direction: {
               ...s.direction,
-              artwork: { ...s.direction.artwork, offset: clampOffset(offset) },
+              artwork: {
+                ...s.direction.artwork,
+                offset: clampOffset(offset, s.direction.artwork.scale),
+              },
             },
           }
         : {},
     ),
+
+  // Resizing is one write, not two — but it is two *values*: growing the box
+  // shrinks the room the mark has to move, so the offset is re-clamped against the
+  // new size in the same update. Doing it anywhere else would leave a gap where
+  // the store holds an offset that is only legal at the old scale, and the
+  // renderer would silently disagree with the readout beside the slider.
+  setArtworkScale: (scale) =>
+    set((s) => {
+      const artwork = s.direction.artwork;
+      if (!artwork) return {};
+      const next = clampScale(scale);
+      return {
+        direction: {
+          ...s.direction,
+          artwork: {
+            ...artwork,
+            scale: next,
+            ...(artwork.offset
+              ? { offset: clampOffset(artwork.offset, next) }
+              : {}),
+          },
+        },
+      };
+    }),
 
   setPalette: (palette) => set((s) => ({ direction: { ...s.direction, palette } })),
   setPaletteId: (id) =>

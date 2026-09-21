@@ -40,17 +40,78 @@ export const MARK_BOX = 0.3;
 export const MARK_CIRCLE = MARK_BOX * Math.SQRT2;
 
 /**
- * How far the mark's box may travel from the canvas centre, as a canvas fraction.
+ * How far the mark's box may travel from the canvas centre, as a canvas fraction,
+ * **at its default size**.
  *
  * The box is 60% of the canvas, so its centre has 20% of canvas to move in each
  * direction before an edge of the box leaves the canvas. Stopping there is what
  * keeps dragging a positioning tool rather than a way to lose half a logo off an
  * edge: the artwork you place is always artwork the export contains.
+ *
+ * Scaling the artwork grows the box, so the room to move shrinks — that is
+ * `markTravel`, and this constant is only its scale-1 case.
  */
 export const MARK_TRAVEL = 1 / 2 - MARK_BOX;
 
 /** The same limit in canvas units, for the studio's readouts and arrow nudges. */
 export const MAX_OFFSET_UNITS = MARK_TRAVEL * CANVAS_SIZE;
+
+/**
+ * How far the artwork can be resized, as a multiple of the default box.
+ *
+ * `MAX_MARK_SCALE` is where a *square* image fills the canvas exactly: the box
+ * half-extent is `MARK_BOX × scale`, so `0.5 / MARK_BOX` is the scale at which
+ * the box reaches the canvas edge and `meet` stops leaving any margin. Allowing
+ * more would mean a logo whose edges are outside the file, which is the one thing
+ * this studio refuses to do — so the limit is a statement about the export, not
+ * an arbitrary slider end.
+ *
+ * `MIN_MARK_SCALE` is the other end: a logo small enough to read as a dot. 0.1 is
+ * 6% of the canvas, a sixth of the default, which is as small as an icon logo can
+ * be drawn and still be judged as a shape.
+ */
+export const MIN_MARK_SCALE = 0.1;
+export const MAX_MARK_SCALE = 0.5 / MARK_BOX;
+
+/**
+ * The artwork's scale, clamped to the range above.
+ *
+ * Applied at both ends for the same reason `clampOffset` is: the value can arrive
+ * from `localStorage`, which is editable by anyone, and a scale of `1e6` would
+ * put a logo through every platform's mask and off the canvas.
+ */
+export function clampScale(scale?: number): number {
+  if (typeof scale !== "number" || !Number.isFinite(scale)) return 1;
+  return Math.max(MIN_MARK_SCALE, Math.min(MAX_MARK_SCALE, scale));
+}
+
+/**
+ * Half-extent of the artwork's box at a given scale, as a canvas fraction.
+ *
+ * This is the single number the rest of the file is built on: grow the box and
+ * every derived quantity — the reach from the centre, the room to move, the fit
+ * that survives a mask — follows from it rather than being recomputed by hand.
+ */
+export function markHalf(scale = 1): number {
+  return MARK_BOX * clampScale(scale);
+}
+
+/**
+ * How far the mark's box may travel from the centre at a given scale.
+ *
+ * Shrinks as the artwork grows, and is exactly zero at `MAX_MARK_SCALE`: a mark
+ * that fills the canvas has nowhere to go, so it is pinned to the middle rather
+ * than allowed to hang off an edge. `Math.max(0, …)` is belt and braces — the
+ * clamp above already guarantees it cannot go negative.
+ */
+export function markTravel(scale = 1): number {
+  return Math.max(0, 1 / 2 - markHalf(scale));
+}
+
+/** The travel limit in canvas units, for readouts and nudge limits. */
+export function maxOffsetUnits(scale = 1): number {
+  return markTravel(scale) * CANVAS_SIZE;
+}
 
 /**
  * How far the contact shadow reaches past the mark that casts it. Applied only
@@ -127,10 +188,14 @@ export function targetById(id: ExportTarget["id"]): ExportTarget {
  * clamps again — because the offset can also arrive from `localStorage`, which is
  * editable by anyone.
  */
-export function clampOffset(offset: MarkOffset | undefined): MarkOffset {
-  const limit = MARK_TRAVEL * CANVAS_SIZE;
+export function clampOffset(offset: MarkOffset | undefined, scale = 1): MarkOffset {
+  const limit = maxOffsetUnits(scale);
+  // `+ 0` normalises negative zero, which `Math.max(-0, -n)` returns once the
+  // limit itself is 0 — the fill scale. It is not cosmetic: the renderer formats
+  // this straight into the SVG's `x`/`y`, and "-0.0" is a coordinate nobody meant
+  // to write.
   const clamp = (value: number) =>
-    Number.isFinite(value) ? Math.max(-limit, Math.min(limit, value)) : 0;
+    Number.isFinite(value) ? Math.max(-limit, Math.min(limit, value)) + 0 : 0;
   return { x: clamp(offset?.x ?? 0), y: clamp(offset?.y ?? 0) };
 }
 
@@ -144,16 +209,22 @@ export function clampOffset(offset: MarkOffset | undefined): MarkOffset {
  * the only way the same logo can both sit off-centre and survive Android's
  * 66/108 circle.
  */
-export function artworkExtent(shape: "box" | "circle", offset?: MarkOffset): number {
-  const { x, y } = clampOffset(offset);
-  // Exactly the table values when centred, rather than a value that agrees with
-  // them to within a rounding error.
-  if (x === 0 && y === 0) return shape === "box" ? MARK_BOX : MARK_CIRCLE;
+export function artworkExtent(
+  shape: "box" | "circle",
+  offset?: MarkOffset,
+  scale = 1,
+): number {
+  const half = markHalf(scale);
+  const { x, y } = clampOffset(offset, scale);
+  // Exactly the derived values when centred, rather than a value that agrees
+  // with them to within a rounding error.
+  if (x === 0 && y === 0)
+    return shape === "box" ? half : half * Math.SQRT2;
   const ox = Math.abs(x) / CANVAS_SIZE;
   const oy = Math.abs(y) / CANVAS_SIZE;
   return shape === "box"
-    ? Math.max(ox, oy) + MARK_BOX
-    : Math.hypot(ox + MARK_BOX, oy + MARK_BOX);
+    ? Math.max(ox, oy) + half
+    : Math.hypot(ox + half, oy + half);
 }
 
 /**
@@ -173,12 +244,13 @@ export function fitFor(
   target: ExportTarget,
   finish: Finish,
   offset?: MarkOffset,
+  scale = 1,
 ): number {
   const limit = target.safeBox ?? target.safeCircle;
   if (limit === undefined) return 1;
 
   const shadow = finish.shadow > 0 ? SHADOW_SPREAD : 0;
-  const extent = artworkExtent(target.safeBox ? "box" : "circle", offset);
+  const extent = artworkExtent(target.safeBox ? "box" : "circle", offset, scale);
   return Math.min(1, (limit - shadow) / extent);
 }
 

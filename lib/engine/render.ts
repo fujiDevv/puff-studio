@@ -4,7 +4,7 @@ import {
   roundRectPath,
   squarePath,
 } from "./geometry";
-import { clampOffset, MARK_BOX } from "./targets";
+import { clampOffset, markHalf } from "./targets";
 import { MAX_RADIUS, type Direction, type MarkArtwork, type RenderOptions } from "./types";
 
 /**
@@ -539,10 +539,10 @@ export function renderSvg(
     artwork && finish.shadow > 0
       ? [
           `<g transform="translate(${(S * 0.018).toFixed(1)} ${(S * 0.028).toFixed(1)})" filter="url(#${uid}-shadow)" opacity="${(finish.shadow * 0.5).toFixed(3)}">`,
-          `<use href="#${uid}-mk"/>`,
+          `<use ${ref(`#${uid}-mk`)}/>`,
           `</g>`,
           `<g filter="url(#${uid}-shadow-soft)" opacity="${(finish.shadow * 0.28).toFixed(3)}">`,
-          `<use href="#${uid}-mk"/>`,
+          `<use ${ref(`#${uid}-mk`)}/>`,
           `</g>`,
         ].join("")
       : "";
@@ -551,7 +551,7 @@ export function renderSvg(
   // `<defs>`, so a document with no reference to it paints nothing at all — and
   // the only other references are the shadow passes, which would leave an upload
   // rendering as two faint smears at 0.15 and 0.08 opacity instead of as itself.
-  const body = artwork ? `<use href="#${uid}-mk"/>` : "";
+  const body = artwork ? `<use ${ref(`#${uid}-mk`)}/>` : "";
 
   const grain =
     finish.grain > 0
@@ -581,7 +581,8 @@ export function renderSvg(
     : "";
 
   return [
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${S} ${S}" width="${size}" height="${size}" role="img">`,
+    // `xmlns:xlink` is declared even on a plate with no artwork: see `ref`.
+    `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 ${S} ${S}" width="${size}" height="${size}" role="img">`,
     defs,
     `<g${canvasClip}>`,
     showPlate ? fieldLayers(uid, direction) : "",
@@ -616,16 +617,47 @@ export function renderSvg(
  * `<image>`'s own coordinates rather than onto a wrapping transform, so the fit
  * the export applies about the centre composes with it in the right order: the
  * mark is placed, then the whole composition is scaled toward the middle.
+ *
+ * Resizing is the *box* changing size, not the image being stretched: the `meet`
+ * fit runs after the box does, so a logo keeps its own aspect ratio at every
+ * scale. Growing the box is therefore equivalent to zooming about the mark's own
+ * centre — which is what makes one `<image>` rectangle enough to express both
+ * size and position, with no wrapper transform to keep in step with them.
+ *
+ * Note that the clamp is given the mark's own scale rather than the default: at
+ * `MAX_MARK_SCALE` the box fills the canvas and there is no room to move at all,
+ * so a stored offset that was legal at a smaller size is pulled back to the
+ * middle here rather than rendered half off the edge.
  */
 function artworkBody(mark: MarkArtwork): string {
-  const half = S * MARK_BOX;
+  const half = S * markHalf(mark.scale);
   const side = half * 2;
-  const { x, y } = clampOffset(mark.offset);
+  const { x, y } = clampOffset(mark.offset, mark.scale);
   return (
-    `<image href="${attr(mark.href)}" x="${(S / 2 - half + x).toFixed(1)}" ` +
+    `<image ${ref(attr(mark.href))} x="${(S / 2 - half + x).toFixed(1)}" ` +
     `y="${(S / 2 - half + y).toFixed(1)}" width="${side.toFixed(1)}" ` +
     `height="${side.toFixed(1)}" preserveAspectRatio="xMidYMid meet"/>`
   );
+}
+
+/**
+ * A reference written twice: once the SVG 2 way, once the old way.
+ *
+ * SVG 2 dropped the need for the xlink namespace, so `href` alone is correct and
+ * every browser renders it — which is why this went unnoticed. **Importers have
+ * not caught up.** Several design tools and rasterizers resolve `xlink:href`
+ * only, and the symptom is not an error: an `<image>` with an unresolvable
+ * reference draws nothing, so the plate arrives with the logo simply missing from
+ * it. That is the worst shape a bug can take here, because the file is a valid
+ * SVG that looks complete in a text editor.
+ *
+ * Emitting both costs a few bytes and is what Inkscape, Figma and Illustrator's
+ * own exporters do. The namespace is declared on the root unconditionally — an
+ * unused declaration is harmless, and a condition that has to stay in step with
+ * every `<use>` in this file is not.
+ */
+function ref(href: string) {
+  return `href="${href}" xlink:href="${href}"`;
 }
 
 /**

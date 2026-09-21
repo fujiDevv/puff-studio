@@ -9,15 +9,15 @@ import {
   downloadExportSet,
   rasterizeTarget,
   slugify,
+  svgMaster,
   targetFilename,
 } from "@/lib/engine/client";
 import { artworkExtent, EXPORT_TARGETS, fitFor } from "@/lib/engine/targets";
-import { renderSvg } from "@/lib/engine/render";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
 /**
- * The export panel.
+ * The export panel — the contents of the header's popover.
  *
  * Every target is listed with the numbers that decide whether it survives its
  * platform's mask — the raster size, the safe area, and the fit this document
@@ -33,6 +33,10 @@ import { cn } from "@/lib/utils";
  * an empty plate exports perfectly well. What the table cannot hide is the one
  * asymmetry worth being loud about: the four PNGs are square on purpose, because
  * each platform masks the master itself, while the SVG carries your corners.
+ *
+ * It sits behind a button in the header because the file set is a statement about
+ * the whole document, not about any one lever in the Design panel beside it — and
+ * because "where do I get the files" should not be answered by scrolling.
  */
 export function ExportPanel({ className }: { className?: string }) {
   const direction = useStudio((s) => s.direction);
@@ -84,13 +88,20 @@ export function ExportPanel({ className }: { className?: string }) {
 
   async function onCopySvg() {
     try {
-      // The same render the SVG download produces, corners included: it is the
-      // design master, and whoever copies it wants the plate they are looking at.
-      await navigator.clipboard.writeText(
-        renderSvg(direction, { corners: "rounded", radius: direction.radius }),
-      );
+      // The *same* function the SVG download uses, rather than the same options
+      // written out a second time: a copy that differed from the download would
+      // be the kind of bug nobody reports, because both files look fine alone.
+      // `clipboard` is undefined outside a secure context, which is a real way
+      // for this to fail — a LAN preview over plain http, for instance. Checked
+      // rather than left to throw, so the message says what to do about it.
+      if (!navigator.clipboard?.writeText) {
+        throw new Error(
+          "This browser blocks clipboard access here. Open the studio over https or localhost.",
+        );
+      }
+      await navigator.clipboard.writeText(svgMaster(direction));
       toast.success("SVG copied", {
-        description: `${slug}-icon.svg — 1024 units, radius ${direction.radius.toFixed(2)}`,
+        description: `${slug}-icon.svg — 1024 units, your logo embedded, radius ${direction.radius.toFixed(2)}`,
       });
     } catch (error) {
       toast.error("Could not copy", {

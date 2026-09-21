@@ -7,7 +7,9 @@ import { Artwork } from "@/components/studio/artwork";
 import { FinishPanel } from "@/components/studio/finish";
 import { Look } from "@/components/studio/look";
 import { Position } from "@/components/studio/position";
+import { Size } from "@/components/studio/size";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { clampScale } from "@/lib/engine/targets";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -28,7 +30,7 @@ import { cn } from "@/lib/utils";
  * together:
  *
  *  - **Look** — palette, field mode, corner radius.
- *  - **Logo** — the file, and the offset that positions it.
+ *  - **Logo** — the file, its size, and the offset that positions it.
  *  - **Finish** — the shadow and the grain.
  *
  * Each trigger carries the one number worth seeing without opening it, because
@@ -64,13 +66,20 @@ const TABS = [
 export function Editor({ className }: { className?: string }) {
   const radius = useStudio((s) => s.direction.radius);
   const artwork = useStudio((s) => s.direction.artwork);
+  const scale = clampScale(artwork?.scale);
 
   /** The one-line state reading that sits under each trigger's label. */
   const badge: Record<(typeof TABS)[number]["id"], string> = {
     // To six characters, because this is a glance and not the readout — the
     // exact value is in the tab, printed to two decimals.
     look: `${Math.round(radius)}u`,
-    logo: artwork ? "Set" : "Empty",
+    // A resized logo reports the size rather than the fact that one is loaded:
+    // "Set" is answered by the frame on the canvas, and "how big" is not.
+    logo: artwork
+      ? scale === 1
+        ? "Set"
+        : `${Math.round(scale * 100)}%`
+      : "Empty",
     finish: "",
   };
 
@@ -100,12 +109,13 @@ export function Editor({ className }: { className?: string }) {
 
         <TabsContent value="logo" keepMounted className="flex flex-col gap-5 pt-3">
           <Artwork />
+          <Size />
           <Position />
           <Note>
-            The whole logo survives every export: an offset mark is fitted so the
-            platform&rsquo;s mask cannot crop it, which means moving it toward an
-            edge shrinks the fitted export rather than clipping it. Changing the
-            look keeps the logo, and where you put it.
+            The whole logo survives every export: a mark that is moved or enlarged
+            is fitted so the platform&rsquo;s mask cannot crop it, which means
+            either one shrinks the fitted export rather than clipping it. Changing
+            the look keeps the logo, and where you put it and how big it is.
           </Note>
         </TabsContent>
 

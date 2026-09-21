@@ -58,13 +58,19 @@ const {
   MARK_BOX,
   MARK_CIRCLE,
   MARK_TRAVEL,
+  MAX_MARK_SCALE,
   MAX_OFFSET_UNITS,
+  MIN_MARK_SCALE,
   SHADOW_SPREAD,
   artworkExtent,
   clampOffset,
+  clampScale,
   fitFor,
   guideBox,
   guideCircle,
+  markHalf,
+  markTravel,
+  maxOffsetUnits,
   targetById,
   TEMPLATES,
   RADIUS_LIMITS,
@@ -109,6 +115,25 @@ const plate = (overrides = {}) => ({
   seedHint: 42,
   ...(overrides.artwork ? { artwork: overrides.artwork } : {}),
 });
+
+/**
+ * The `<use>` that paints a mark, in full.
+ *
+ * Written as a helper because the reference is emitted **twice** — the SVG 2
+ * `href` and the older `xlink:href` — so every pattern that means "this file
+ * paints its artwork" has to name both, or it would match a file that only a
+ * browser can read.
+ */
+const MK_USE = (uid) => `<use href="#${uid}-mk" xlink:href="#${uid}-mk"/>`;
+
+/**
+ * The artwork's own rectangle, past both copies of its href.
+ *
+ * The href is a data URL of unknown length, so the second one has to be stepped
+ * over by pattern rather than by count of characters.
+ */
+const IMAGE = /<image href="[^"]+" xlink:href="[^"]+" x="([-\d.]+)" y="([-\d.]+)" width="([\d.]+)"/;
+const IMAGE_XY = /<image href="[^"]+" xlink:href="[^"]+" x="([-\d.]+)" y="([-\d.]+)"/;
 
 /** A stand-in upload. The renderer never decodes it, so the bytes are opaque. */
 const artwork = (overrides = {}) => ({
@@ -307,6 +332,44 @@ test("the artwork is embedded, never linked", () => {
   }
 });
 
+test("every reference is readable by an importer, not only by a browser", () => {
+  const svg = renderSvg(plate({ artwork: artwork() }), { uid: "xlink" });
+
+  // The bug this exists for: SVG 2 made plain `href` correct, so the file renders
+  // in every browser — and the logo was **missing** when the SVG was pasted into a
+  // design tool, because those resolve `xlink:href` only. An unresolvable
+  // `<image>` draws nothing, so the symptom is a plate with a hole in it and no
+  // error anywhere, which is why it took a paste to find.
+  assert.match(
+    svg,
+    /^<svg xmlns="http:\/\/www\.w3\.org\/2000\/svg" xmlns:xlink="http:\/\/www\.w3\.org\/1999\/xlink"/,
+    "the xlink namespace has to be declared, or a prefixed attribute is invalid XML",
+  );
+
+  // Both forms, on both elements that reference anything.
+  const image = svg.match(/<image [^>]*>/)?.[0] ?? "";
+  assert.ok(image.includes("href=") && image.includes("xlink:href="), `image refs: ${image.slice(0, 60)}`);
+  const uses = [...svg.matchAll(/<use [^>]*>/g)].map((m) => m[0]);
+  assert.equal(uses.length, 3);
+  for (const use of uses) {
+    assert.ok(
+      /href="#[^"]+"/.test(use.replace("xlink:href=", "")) && /xlink:href="#[^"]+"/.test(use),
+      `use is missing a form: ${use}`,
+    );
+  }
+
+  // Every reference has to resolve *within the file*. An unprefixed href is not a
+  // namespace error, but an `xlink:href` with no declaration is — the document
+  // would be rejected before anything rendered, and the plate would not appear at
+  // all rather than appearing without its logo.
+  for (const [, prefix] of svg.matchAll(/\s(xlink:)?href="[^"]*"/g)) {
+    if (prefix) {
+      assert.ok(svg.includes("xmlns:xlink"), "xlink:href without the namespace declaration");
+      break;
+    }
+  }
+});
+
 test("the artwork is painted, not merely defined", () => {
   const svg = renderSvg(plate({ artwork: artwork() }), { uid: "paint" });
   // The group lives in the document's definitions, so a document with no
@@ -314,18 +377,18 @@ test("the artwork is painted, not merely defined", () => {
   // were the two blurred shadow passes, so artwork rendered as two faint smears at
   // 0.15 and 0.08 opacity while the markup still looked complete.
   const shadows = svg.lastIndexOf("paint-shadow-soft");
-  const bodyAt = svg.lastIndexOf('<use href="#paint-mk"/>');
+  const bodyAt = svg.lastIndexOf(MK_USE("paint"));
   assert.ok(shadows > 0, "expected the shadow passes");
   assert.ok(bodyAt > shadows, "the artwork is blurred but never drawn");
   // Once for the body and once per shadow pass, so it is not painted twice over
   // itself either.
-  assert.equal(svg.match(/<use href="#paint-mk"\/>/g).length, 3);
+  assert.equal(svg.split(MK_USE("paint")).length - 1, 3);
 });
 
 test("the fit transform reaches the artwork", () => {
   const svg = renderSvg(plate({ artwork: artwork() }), { uid: "fit", fit: 0.6 });
   assert.match(svg, /<g id="fit-mk" transform="translate\(512 512\) scale\(0\.6000\)/);
-  assert.match(svg, /<use href="#fit-mk"\/>/);
+  assert.ok(svg.includes(MK_USE("fit")));
 });
 
 test("the artwork sits in the box the extent tables describe", () => {
@@ -333,7 +396,7 @@ test("the artwork sits in the box the extent tables describe", () => {
   const half = MARK_BOX * CANVAS_SIZE;
   assert.match(
     svg,
-    new RegExp(`<image href="data:[^"]+" x="${(CANVAS_SIZE / 2 - half).toFixed(1)}"`),
+    new RegExp(`<image href="data:[^"]+" xlink:href="data:[^"]+" x="${(CANVAS_SIZE / 2 - half).toFixed(1)}"`),
   );
   assert.match(svg, new RegExp(`width="${(half * 2).toFixed(1)}"`));
   // `meet`, not `slice`: a logo is not going to arrive square, and stretching it
@@ -575,7 +638,7 @@ test("a sample plate paints its mark and stays self-contained", () => {
   );
   // Once for the body and once per shadow pass — the count is what says the mark
   // is painted rather than merely defined.
-  assert.equal(svg.match(/<use href="#sample-mk"\/>/g).length, 3);
+  assert.equal(svg.split(MK_USE("sample")).length - 1, 3);
   const hrefs = [...svg.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
   assert.ok(hrefs.length > 0);
   for (const href of hrefs) {
@@ -661,6 +724,98 @@ test("the extent tables describe the artwork box and nothing else", () => {
   // own edge would leave the canvas.
   assert.ok(Math.abs(MARK_TRAVEL - 0.2) < 1e-9);
   assert.ok(Math.abs(MAX_OFFSET_UNITS - 204.8) < 1e-9);
+  // At the default size the derived helpers agree with the constants, so a later
+  // edit cannot make the scaled path and the constant disagree about scale 1.
+  assert.equal(markHalf(1), MARK_BOX);
+  assert.equal(markTravel(1), MARK_TRAVEL);
+  assert.equal(maxOffsetUnits(1), MAX_OFFSET_UNITS);
+  assert.equal(artworkExtent("box", undefined, 1), MARK_BOX);
+});
+
+/* --------------------------------------------------------------- resizing */
+
+test("the artwork is drawn at the size the document asks for, about its own centre", () => {
+  const at = (svg) => svg.match(IMAGE).slice(1).map(Number);
+  const base = renderSvg(plate({ artwork: artwork() }), { uid: "sz1" });
+  const big = renderSvg(plate({ artwork: artwork({ scale: 1.5 }) }), { uid: "sz2" });
+  const [x0, y0, w0] = at(base);
+  const [x1, y1, w1] = at(big);
+  assert.ok(Math.abs(w0 - MARK_BOX * 2 * CANVAS_SIZE) < 0.05, `authored width ${w0}`);
+  assert.ok(Math.abs(w1 / w0 - 1.5) < 1e-6, `${w0} → ${w1} is not 1.5×`);
+  // Resizing zooms about the mark's own centre, so an unoffset mark's box keeps
+  // its middle: growing it must not also slide it.
+  for (const [x, y, w] of [
+    [x0, y0, w0],
+    [x1, y1, w1],
+  ]) {
+    assert.ok(Math.abs(x + w / 2 - CANVAS_SIZE / 2) < 0.05, "the box did not stay centred");
+    assert.ok(Math.abs(y + w / 2 - CANVAS_SIZE / 2) < 0.05);
+  }
+});
+
+test("the scale is clamped, and at the fill scale the mark is pinned to the middle", () => {
+  assert.equal(clampScale(undefined), 1, "an absent scale is the authored size");
+  assert.equal(clampScale(Number.NaN), 1, "a malformed scale falls back rather than to a limit");
+  assert.equal(clampScale(1e6), MAX_MARK_SCALE);
+  assert.equal(clampScale(0), MIN_MARK_SCALE);
+  // The fill scale is defined as the one where a square image touches all four
+  // edges — if this drifts, `MAX_MARK_SCALE` has stopped meaning anything.
+  assert.ok(Math.abs(markHalf(MAX_MARK_SCALE) - 0.5) < 1e-9);
+  assert.equal(maxOffsetUnits(MAX_MARK_SCALE), 0, "a full-bleed mark has nowhere to go");
+  assert.deepEqual(clampOffset({ x: 400, y: -400 }, MAX_MARK_SCALE), { x: 0, y: 0 });
+  // A bigger mark has strictly less room to move, at every step.
+  for (const [small, large] of [
+    [MIN_MARK_SCALE, 1],
+    [1, 1.3],
+    [1.3, MAX_MARK_SCALE],
+  ]) {
+    assert.ok(
+      markTravel(large) < markTravel(small),
+      `travel did not shrink from ${small} to ${large}`,
+    );
+  }
+  // And the renderer applies both clamps itself: this document arrives from
+  // `localStorage`, which anyone can edit.
+  const svg = renderSvg(
+    plate({ artwork: artwork({ scale: 500, offset: { x: 400, y: 400 } }) }),
+    { uid: "szclamp" },
+  );
+  const [x, y, width] = svg.match(IMAGE).slice(1).map(Number);
+  assert.ok(Math.abs(width - CANVAS_SIZE) < 0.05, `clamped width ${width}`);
+  assert.ok(Math.abs(x) < 0.05 && Math.abs(y) < 0.05, `clamped to ${x},${y}`);
+});
+
+test("an enlarged mark is fitted harder, so the export still contains it", () => {
+  const finish = { shadow: 1, grain: 0.1 };
+  const shadow = SHADOW_SPREAD;
+  for (const id of ["ios", "play", "android-fg"]) {
+    const target = targetById(id);
+    const limit = target.safeBox ?? target.safeCircle;
+    const shape = target.safeBox ? "box" : "circle";
+    for (const scale of [MIN_MARK_SCALE, 1, 1.3, MAX_MARK_SCALE]) {
+      for (const offset of [undefined, { x: MAX_OFFSET_UNITS, y: MAX_OFFSET_UNITS }]) {
+        const fit = fitFor(target, finish, offset, scale);
+        const reached = artworkExtent(shape, offset, scale) * fit + shadow;
+        assert.ok(
+          fit > 0 && reached <= limit + 1e-9,
+          `${id} at ${scale}× / ${offset ? "corner" : "centre"}: ` +
+            `${reached.toFixed(3)} over ${limit.toFixed(3)} (fit ${fit.toFixed(3)})`,
+        );
+      }
+    }
+  }
+
+  // Monotonic, so the fit can be trusted as "this much of the allowed size is
+  // used": a bigger mark is never fitted more generously than a smaller one.
+  const ios = targetById("ios");
+  const flat = { shadow: 0, grain: 0 };
+  const fitted = [1, 1.2, 1.4, MAX_MARK_SCALE].map((scale) =>
+    fitFor(ios, flat, undefined, scale),
+  );
+  for (let i = 1; i < fitted.length; i++) {
+    assert.ok(fitted[i] <= fitted[i - 1] + 1e-9, `fit rose at step ${i}: ${fitted}`);
+  }
+  assert.ok(fitted[fitted.length - 1] < fitted[0], "enlarging changed nothing");
 });
 
 /* ------------------------------------------------------------- position */
@@ -671,8 +826,7 @@ test("the offset reaches the image, and is clamped on the way through", () => {
     plate({ artwork: artwork({ offset: { x: 100, y: -60 } }) }),
     { uid: "off1" },
   );
-  const at = (svg) =>
-    svg.match(/<image href="[^"]+" x="([-\d.]+)" y="([-\d.]+)"/).slice(1).map(Number);
+  const at = (svg) => svg.match(IMAGE_XY).slice(1).map(Number);
   const [x0, y0] = at(centred);
   const [x1, y1] = at(moved);
   assert.equal(x1 - x0, 100, "the x offset did not reach the image");
@@ -737,18 +891,30 @@ test("every document survives every export target", () => {
     plate({ artwork: artwork() }),
     plate({ artwork: artwork(), finish: { shadow: 1 } }),
     plate({ artwork: artwork(), finish: { shadow: 0 } }),
+    // The resized ends of the range, each with the heaviest shadow it can carry:
+    // the fill scale is the largest a mark can be drawn, and the smallest is the
+    // one with the most room to travel, which is the worst case for a box mask.
+    plate({ artwork: artwork({ scale: MAX_MARK_SCALE }), finish: { shadow: 1 } }),
+    plate({
+      artwork: artwork({ scale: MIN_MARK_SCALE, offset: { x: MAX_OFFSET_UNITS, y: MAX_OFFSET_UNITS } }),
+      finish: { shadow: 1 },
+    }),
   ];
   for (const target of EXPORT_TARGETS) {
     const limit = target.safeBox ?? target.safeCircle;
     if (limit === undefined) continue;
     const shape = target.safeBox ? "box" : "circle";
     for (const [index, direction] of documents.entries()) {
-      const fit = fitFor(target, direction.finish);
+      // Read from the document rather than from a fixed size and position: the
+      // point of this check is that *whatever* the document says is honoured by
+      // the fit, so it must be the document's own numbers that are measured.
+      const art = direction.artwork;
+      const fit = fitFor(target, direction.finish, art?.offset, art?.scale);
       assert.ok(fit > 0 && fit <= 1, `${target.id}/${index}: fit ${fit}`);
       // The shadow is the one term the fit cannot shrink, so it is added back
       // after the scaling rather than being left out of the budget.
       const shadow = direction.finish.shadow > 0 ? SHADOW_SPREAD : 0;
-      const reached = artworkExtent(shape) * fit + shadow;
+      const reached = artworkExtent(shape, art?.offset, art?.scale) * fit + shadow;
       assert.ok(
         reached <= limit + 1e-9,
         `${target.id}/${index}: ${reached.toFixed(3)} over ${limit.toFixed(3)}`,

@@ -58,6 +58,19 @@ async function resolveBase() {
 
 const BASE = await resolveBase();
 
+/**
+ * The viewport every check runs against — named, because one check has to put it
+ * back.
+ *
+ * `Emulation.setDeviceMetricsOverride` **replaces** the override rather than
+ * stacking one, so the mobile check cannot undo itself with
+ * `Emulation.clearDeviceMetricsOverride`: that removes emulation entirely and drops
+ * back to Chrome's real window, which headless reports as 756×469 — below this
+ * page's own `md` breakpoint. It was caught by the check *after* it, which went
+ * from a 732px plate to 76px while still claiming to measure the desktop layout.
+ */
+const VIEWPORT = { width: 1280, height: 900, deviceScaleFactor: 1, mobile: false };
+
 /** Injected into the page: re-renders an SVG with its mark group removed and
  * measures how many pixels changed. A tile whose mark is missing — say a
  * dangling `fill="url(#…)"` — scores zero however complete the markup looks. */
@@ -167,12 +180,7 @@ async function main() {
     // `sm`/`lg` breakpoints this page is designed around, and a hidden or
     // narrow element still reports `innerText` and zero-sized rects — so an
     // unpinned run measures the wrong layout and does not notice.
-    await cdp.send("Emulation.setDeviceMetricsOverride", {
-      width: 1280,
-      height: 900,
-      deviceScaleFactor: 1,
-      mobile: false,
-    });
+    await cdp.send("Emulation.setDeviceMetricsOverride", VIEWPORT);
 
     /* ------------------------------------------------------------ landing */
 
@@ -520,17 +528,25 @@ async function main() {
     await cdp.evaluate("localStorage.clear()");
     await cdp.goto(`${BASE}/studio`);
 
-    /* ---- the shell: a sidebar that scrolls independently of the canvas ---- */
+    /* ---- the shell: two columns, and the gallery scrolls in place ---- */
 
     const shell = await cdp.evaluate(`(() => {
         const list = document.querySelector('[data-slot="template-list"]');
-        const sidebar = document.querySelector('[data-slot="studio-sidebar"]');
+        const editor = document.querySelector('[data-slot="studio-editor"]');
+        const main = document.querySelector('main');
+        const er = editor?.getBoundingClientRect();
+        const cr = main?.getBoundingClientRect();
+        const root = editor?.parentElement?.getBoundingClientRect();
         return {
-          sidebar: !!sidebar,
-          sidebarHeight: sidebar ? Math.round(sidebar.getBoundingClientRect().height) : 0,
-          // The list must own its scrolling. If it overflowed the page instead,
-          // the canvas would scroll away while you browse and the observer below
-          // would be measuring the wrong root.
+          editor: !!editor,
+          // Side by side, canvas on the left. Asserted as a *relationship*, since
+          // the point of the two-column change is that these two no longer sit
+          // above one another.
+          sideBySide: !!cr && !!er && cr.right <= er.left + 1 && cr.width > 200,
+          fullHeight: !!er && !!root && Math.abs(er.height - root.height) <= 1,
+          canvasHeight: cr ? Math.round(cr.height) : 0,
+          // The list must own its scrolling. If it overflowed the editor instead,
+          // the observer below would be measuring the wrong root.
           listScrolls: list ? list.scrollHeight > list.clientHeight + 1 : false,
           overflow: list ? getComputedStyle(list).overflowY : 'none',
           initial: document.querySelectorAll('[data-slot="template-card"]').length,
@@ -539,9 +555,57 @@ async function main() {
       })()`);
 
     record(
-      "the studio is a sidebar shell whose gallery scrolls in place",
-      shell.sidebar && shell.listScrolls && shell.overflow === "auto",
-      `sidebar ${shell.sidebarHeight}px · list overflow-y=${shell.overflow} · ${shell.initial} cards of a longer list`,
+      "the studio is two columns: the canvas, and the editor beside it",
+      shell.editor && shell.sideBySide && shell.fullHeight && shell.canvasHeight > 200,
+      `editor full height=${shell.fullHeight} · canvas ${shell.canvasHeight}px · editor beside it=${shell.sideBySide}`,
+    );
+
+    record(
+      "the look library scrolls in place inside the editor",
+      shell.listScrolls && shell.overflow === "auto",
+      `list overflow-y=${shell.overflow} · ${shell.initial} cards of a longer list`,
+    );
+
+    // The same two columns on a phone, stacked. Worth a check of its own because
+    // this is where a two-column layout actually breaks: the canvas stops being
+    // full-height, the editor takes the rest, and neither may overflow sideways.
+    // The viewport is emulated rather than reasoned about — a breakpoint that
+    // compiles to nothing looks identical to one that works.
+    await cdp.send("Emulation.setDeviceMetricsOverride", {
+      ...VIEWPORT,
+      width: 414,
+    });
+    await sleep(350);
+    const stacked = JSON.parse(
+      await cdp.evaluate(`(() => {
+        const main = document.querySelector('main').getBoundingClientRect();
+        const editor = document.querySelector('[data-slot="studio-editor"]').getBoundingClientRect();
+        return JSON.stringify({
+          width: window.innerWidth,
+          canvasAbove: main.bottom <= editor.top + 1,
+          editorBelow: editor.top >= main.bottom - 1,
+          // A repeat of the desktop claim, so the stacked case is not "working"
+          // by pouring the editor off the side of the screen.
+          sideBySide: main.right <= editor.left + 1,
+          pageScrolls: document.documentElement.scrollWidth - window.innerWidth,
+          canvasH: Math.round(main.height),
+          editorH: Math.round(editor.height),
+        });
+      })()`),
+    );
+    await cdp.send("Emulation.setDeviceMetricsOverride", VIEWPORT);
+    await sleep(350);
+
+    record(
+      "below the breakpoint the two columns stack instead",
+      stacked.width <= 480 &&
+        stacked.canvasAbove &&
+        !stacked.sideBySide &&
+        stacked.pageScrolls <= 1 &&
+        stacked.canvasH > 100 &&
+        stacked.editorH > 100,
+      `${stacked.width}px: canvas ${stacked.canvasH}px above editor ${stacked.editorH}px · ` +
+        `overflow-x ${stacked.pageScrolls}px`,
     );
 
     // The library is finite, so "infinite scroll" here means a first screenful
@@ -572,8 +636,11 @@ async function main() {
           gated: cards.filter(
             (c) => c.dataset.locked === 'true' || /\\bpro\\b/i.test(c.innerText)
           ).length,
+          // Read off the looks *section* rather than the gallery: the "all free"
+          // claim moved into the section's summary row, where it stays visible
+          // when the library is collapsed.
           freeFlag: /all free/i.test(
-            document.querySelector('[data-slot="template-gallery"]')?.innerText ?? ''
+            document.querySelector('[data-slot="looks-panel"]')?.innerText ?? ''
           ),
           palettes: document.querySelectorAll('[data-slot="editor-palette"] button').length,
           colors: document.querySelectorAll('[data-slot="editor-color"]').length,
@@ -581,7 +648,6 @@ async function main() {
           finishRows: [...document.querySelectorAll('[data-slot="editor-range"]')].map(
             (r) => r.dataset.row
           ),
-          targets: document.querySelectorAll('[data-slot="export-target"]').length,
         };
       })()`);
 
@@ -618,10 +684,9 @@ async function main() {
       scrolled.palettes === 12 &&
         scrolled.colors === 2 &&
         scrolled.fields === 4 &&
-        scrolled.targets === 4 &&
         scrolled.finishRows.join(",") === "shadow,grain",
       `${scrolled.palettes} palettes, ${scrolled.colors} colours, ${scrolled.fields} field modes, ` +
-        `finish [${scrolled.finishRows.join(", ")}], ${scrolled.targets} targets`,
+        `finish [${scrolled.finishRows.join(", ")}]`,
     );
 
     /* ---- the design panel is three tabs, and the recipes behind them ---- */
@@ -970,36 +1035,157 @@ async function main() {
       `rounded wrapper radius=${squircleCanvas.radius} cornerAlpha=[${squircleCanvas.corners.join(",")}] · toggled back to ${backToSquare}`,
     );
 
-    /* ---- legibility at the sizes an icon is actually judged at ---- */
+    /* ---- the canvas: the largest square that fits, and where it sits ---- */
 
-    const strip = await cdp.evaluate(`(() => {
-      const samples = [...document.querySelectorAll('[data-slot="size-sample"]')];
-      return {
-        count: samples.length,
-        declared: samples.map((s) => Number(s.dataset.size)),
-        measured: samples.map((s) => Math.round(s.getBoundingClientRect().width)),
-        painted: samples.every((s) => !!s.querySelector('svg path')),
-      };
-    })()`);
-
-    record(
-      "the preview shows the icon at real home-screen sizes",
-      strip.count === 3 &&
-        strip.painted &&
-        strip.declared.every((d, i) => Math.abs(d - strip.measured[i]) <= 1),
-      `${strip.count} samples at ${strip.measured.join("/")}px, all painted=${strip.painted}`,
+    // Two things are asserted together because they are the same claim: the plate
+    // is square, and it is inside the stage on every edge. `aspect-ratio` alone
+    // cannot express "the largest square that fits" — a square capped by
+    // max-height stops being square — so this is the check that the container
+    // query actually did the job.
+    const geometry = JSON.parse(
+      await cdp.evaluate(`(() => {
+        const plate = document.querySelector('[data-slot="canvas"]');
+        const stage = document.querySelector('[data-slot="canvas-stage"]');
+        const view = document.querySelector('[data-slot="canvas-viewbar"]');
+        const status = document.querySelector('[data-slot="canvas-status"]');
+        const p = plate.getBoundingClientRect();
+        const s = stage.getBoundingClientRect();
+        return JSON.stringify({
+          w: Math.round(p.width),
+          h: Math.round(p.height),
+          // Gaps from the plate to the stage's content box on each side.
+          gaps: [
+            Math.round(p.left - s.left),
+            Math.round(p.top - s.top),
+            Math.round(s.right - p.right),
+            Math.round(s.bottom - p.bottom),
+          ],
+          // Style, not geometry: a plate inside a Card would still measure square.
+          card: !!plate.closest('[class*="rounded-xl"]'),
+          underView: p.top >= view.getBoundingClientRect().bottom - 1,
+          aboveStatus: p.bottom <= status.getBoundingClientRect().top + 1,
+        });
+      })()`),
     );
 
-    /* ---- export panel: per-target download and the SVG copy ---- */
+    record(
+      "the canvas is the largest square that fits the whole column",
+      Math.abs(geometry.w - geometry.h) <= 1 &&
+        geometry.w > 240 &&
+        geometry.gaps.every((g) => g >= 0) &&
+        geometry.underView &&
+        geometry.aboveStatus,
+      `${geometry.w}×${geometry.h} in a stage with gaps [${geometry.gaps.join(", ")}] · ` +
+        `below the view bar=${geometry.underView} · above the status bar=${geometry.aboveStatus}`,
+    );
+
+    /* ---- legibility, on demand: the Preview toggle ---- */
+
+    // Three rendered plates are worth the height when you are judging legibility
+    // and are clutter when you are placing a logo, so they are off until asked
+    // for — and the toggle has to actually move them, in both directions.
+    const strip = JSON.parse(
+      await cdp.evaluate(`(async () => {
+        const settle = () => new Promise((r) => setTimeout(r, 260));
+        const toggle = () => document.querySelector('[data-slot="preview-toggle"]');
+        const read = () => {
+          const samples = [...document.querySelectorAll('[data-slot="size-sample"]')];
+          return {
+            count: samples.length,
+            declared: samples.map((s) => Number(s.dataset.size)),
+            measured: samples.map((s) => Math.round(s.getBoundingClientRect().width)),
+            painted: samples.length > 0 && samples.every((s) => !!s.querySelector('svg path')),
+            expanded: toggle().getAttribute('aria-expanded'),
+            // Docked above the status bar rather than floating over the plate.
+            docked: samples.length
+              ? samples[0].closest('[data-slot="size-strip"]').getBoundingClientRect().bottom <=
+                document.querySelector('[data-slot="canvas-status"]').getBoundingClientRect().top + 1
+              : false,
+          };
+        };
+        const before = read();
+        toggle().click();
+        await settle();
+        const after = read();
+        toggle().click();
+        await settle();
+        const back = read();
+        return JSON.stringify({ before, after, back });
+      })()`),
+    );
+
+    record(
+      "the Preview toggle shows the icon at real home-screen sizes",
+      strip.before.count === 0 &&
+        strip.before.expanded === "false" &&
+        strip.after.count === 3 &&
+        strip.after.painted &&
+        strip.after.docked &&
+        strip.after.declared.join(",") === "180,120,60" &&
+        strip.after.declared.every((d, i) => Math.abs(d - strip.after.measured[i]) <= 1) &&
+        strip.back.count === 0 &&
+        strip.back.expanded === "false",
+      `closed (${strip.before.count}) → open (${strip.after.count} at ` +
+        `${strip.after.measured.join("/")}px, docked=${strip.after.docked}) → closed (${strip.back.count})`,
+    );
+
+    /* ---- export: the header popover, per-target downloads and the SVG copy ---- */
+
+    // The panel moved out of the scrolling column and behind a header button, so
+    // it has to be *opened* before anything inside it exists — a closed popover is
+    // unmounted rather than hidden, and a check that read the DOM regardless would
+    // pass against a trigger wired to nothing.
+    const openExport = async () => {
+      await cdp.evaluate(`(() => {
+        const t = document.querySelector('[data-slot="export-trigger"]');
+        if (!t) return;
+        if (!document.querySelector('[data-slot="export-panel"]')) t.click();
+      })()`);
+      await sleep(300);
+    };
+    const closeExport = async () => {
+      await cdp.evaluate(`(() => {
+        const c = document.querySelector('[data-slot="popover-content"]');
+        if (c) document.querySelector('[data-slot="export-trigger"]').click();
+      })()`);
+      await sleep(300);
+    };
+
+    const beforeOpen = await cdp.evaluate(
+      `!!document.querySelector('[data-slot="export-panel"]')`,
+    );
+    await openExport();
+    const afterOpen = await cdp.evaluate(`(() => ({
+      panel: !!document.querySelector('[data-slot="export-panel"]'),
+      expanded: document.querySelector('[data-slot="export-trigger"]')?.getAttribute('aria-expanded'),
+      inHeader: !!document.querySelector('header [data-slot="export-trigger"]'),
+      // The panel is portaled out of the document flow, so this is the claim that
+      // it left the scrolling column rather than merely also appearing up top.
+      stillInColumn: !!document.querySelector('main [data-slot="export-panel"]'),
+    }))()`);
+
+    record(
+      "the export panel hangs off a button in the header",
+      !beforeOpen &&
+        afterOpen.panel &&
+        afterOpen.inHeader &&
+        afterOpen.expanded === "true" &&
+        !afterOpen.stillInColumn,
+      `closed → ${beforeOpen ? "panel already mounted" : "no panel"} · open → ` +
+        `panel=${afterOpen.panel} aria-expanded=${afterOpen.expanded} · ` +
+        `still in the Design column=${afterOpen.stillInColumn}`,
+    );
 
     const copyButtons = await cdp.evaluate(`(() => ({
       perTarget: document.querySelectorAll('[data-slot="export-target"] button[aria-label^="Download"]').length,
       targets: document.querySelectorAll('[data-slot="export-target"]').length,
     }))()`);
 
+    // Four, named rather than merely non-zero: the count used to be asserted by
+    // the editor-lever check, which no longer has the panel in view.
     record(
       "every export target can be taken on its own",
-      copyButtons.perTarget === copyButtons.targets && copyButtons.targets > 0,
+      copyButtons.perTarget === copyButtons.targets && copyButtons.targets === 4,
       `${copyButtons.perTarget} per-target buttons across ${copyButtons.targets} rows`,
     );
 
@@ -1011,6 +1197,21 @@ async function main() {
       // sanitized-write is the pair that actually covers both calls.
       permissions: ["clipboardReadWrite", "clipboardSanitizedWrite"],
     });
+
+    // An artwork first, because the bug this section exists for is invisible
+    // without one: the copy used to be checked on an empty plate, where a missing
+    // logo and a correctly empty one look exactly alike.
+    const copyFile = await pngFile({ width: 96, height: 96 });
+    const copyDoc = await cdp.send("DOM.getDocument", { depth: 1 });
+    const copyInput = await cdp.send("DOM.querySelector", {
+      nodeId: copyDoc.root.nodeId,
+      selector: '[data-slot="artwork-input"]',
+    });
+    await cdp.send("DOM.setFileInputFiles", {
+      nodeId: copyInput.nodeId,
+      files: [copyFile.path],
+    });
+    await sleep(800);
 
     // Clicked with a real mouse event rather than `element.click()`. A clipboard
     // write needs transient user activation, and a synthetic click is not
@@ -1047,47 +1248,87 @@ async function main() {
         }
       })()`);
 
+    // What the artwork's own href is, straight off the canvas, so "the logo is in
+    // the file" is checked against the bytes the studio is actually drawing. Read
+    // as the un-prefixed attribute, which is the one a DOM lookup can be sure of:
+    // a namespaced `xlink:href` needs `getAttributeNS`, and this only has to prove
+    // the same bytes are in both places.
+    const artHref = await cdp.evaluate(
+      `document.querySelector('[data-slot="canvas"] svg image')?.getAttribute('href') ?? ''`,
+    );
+    const copyShape = typeof copied === "string" && copied.startsWith("<svg")
+      ? {
+          image: copied.includes(artHref) && artHref.length > 0,
+          xlinkNs: /xmlns:xlink="http:\/\/www\.w3\.org\/1999\/xlink"/.test(copied),
+          xlinkRefs: (copied.match(/xlink:href="#/g) ?? []).length,
+          rounded: /clip-path="url\(#[^)]+-canvas\)"/.test(copied),
+        }
+      : {};
+
     record(
-      "Copy SVG puts the square master on the clipboard",
+      "Copy SVG puts the design master, logo included, on the clipboard",
       typeof copied === "string" &&
         copied.startsWith("<svg") &&
         copied.includes('width="1024"') &&
-        copied.includes("viewBox=\"0 0 1024 1024\""),
+        copied.includes("viewBox=\"0 0 1024 1024\"") &&
+        copyShape.image &&
+        copyShape.rounded,
       typeof copied === "string"
-        ? `${copied.length} chars, starts "${copied.slice(0, 24)}"`
+        ? `${copied.length} chars · logo embedded=${copyShape.image} · corners kept=${copyShape.rounded}`
         : "no clipboard text",
     );
+
+    // The bug that started this: SVG 2's plain `href` renders in every browser and
+    // in *some* importers, so a copied SVG pasted into a design tool arrived with
+    // the plate and no logo in it. Both forms are asserted, because emitting one is
+    // exactly what shipped.
+    record(
+      "the copied SVG is readable by an importer, not only by a browser",
+      copyShape.xlinkNs === true && copyShape.xlinkRefs === 3,
+      `xmlns:xlink=${copyShape.xlinkNs} · xlink:href refs=${copyShape.xlinkRefs} (body + 2 shadow passes)`,
+    );
+
+    // Closed again before anything below drives the canvas with a real pointer: an
+    // open popover sits over the page, and a drag aimed at a handle would land on
+    // the panel instead.
+    await closeExport();
+    const closed = await cdp.evaluate(
+      `!!document.querySelector('[data-slot="export-panel"]')`,
+    );
+    record(
+      "closing the export popover puts the canvas back",
+      !closed,
+      `panel mounted after closing=${closed}`,
+    );
+
+    // The plate was emptied so the rest of the run starts from no artwork, which is
+    // the state every check below was written against.
+    await cdp.evaluate(`document.querySelector('[data-slot="artwork-remove"]').click()`);
+    await sleep(400);
 
     /* ---- shuffle: a different template, and a clean document ---- */
 
     const shuffled = await cdp.evaluate(`(async () => {
-        const title = () => document.querySelector('header h1').innerText.trim();
-        // Found by its label, not its title: the title *changes* with the
-        // document's state ("Discard your edits…" vs "not been edited yet"),
-        // which is exactly what this check is about — selecting by title would
-        // make the button vanish the moment it had nothing to discard.
-        const reset = () => [...document.querySelectorAll('header button')]
-          .find((b) => b.textContent.trim() === 'Reset');
+        const title = () => document.querySelector('[data-slot="studio-title"]').innerText.trim();
+        // Selected by slot rather than by label. Both of these were found by their
+        // text until now, which is the kind of selector that breaks for reasons
+        // unrelated to the check: the reset button's own title changes with the
+        // document's state, and the chip row taught this suite that a capitalize
+        // utility rewrites innerText out from under an exact match.
+        const reset = () => document.querySelector('[data-slot="looks-reset"]');
         const before = { title: title(), resetDisabled: reset().disabled };
-        [...document.querySelectorAll('header button')]
-          .find((b) => b.textContent.includes('Shuffle')).click();
+        document.querySelector('[data-slot="looks-shuffle"]').click();
         await new Promise((r) => setTimeout(r, 250));
         return {
           before,
           after: { title: title(), resetDisabled: reset().disabled },
-          // The header carries a Pro badge only for a premium template, so its
-          // absence is how a free plan is confirmed to stay inside the free set.
-          // Read as text rather than through a data-slot: Badge renders via
-          // base-ui useRender, which does not emit its slot state as an
-          // attribute the way Card and Button do.
-          proBadge: document.querySelector('header').innerText.includes('Pro'),
         };
       })()`);
 
     record(
       "shuffle loads a different template, never a repeat",
-      shuffled.before.title !== shuffled.after.title && !shuffled.proBadge,
-      `${shuffled.before.title} → ${shuffled.after.title}${shuffled.proBadge ? " (Pro badge present!)" : ""}`,
+      shuffled.before.title !== shuffled.after.title,
+      `${shuffled.before.title} → ${shuffled.after.title}`,
     );
 
     // Landing on the template's *own* document is the part that would silently
@@ -1227,13 +1468,13 @@ async function main() {
     // from, so which template that is is not this check's business. "Nothing
     // changed" is the invariant, and it holds wherever the studio opens.
     const beforeUnknown = await cdp.evaluate(
-      `document.querySelector('header h1')?.innerText ?? ''`,
+      `document.querySelector('[data-slot="studio-title"]')?.innerText ?? ''`,
     );
     await cdp.goto(`${BASE}/studio?template=not-a-template`);
     await sleep(400);
     const unknownPick = JSON.parse(
       await cdp.evaluate(`(() => JSON.stringify({
-        title: document.querySelector('header h1')?.innerText ?? '',
+        title: document.querySelector('[data-slot="studio-title"]')?.innerText ?? '',
         cards: document.querySelectorAll('[data-slot="template-card"]').length,
       }))()`),
     );
@@ -1273,7 +1514,7 @@ async function main() {
           // The look's name lives in the header now: the canvas card's title is the
           // static word "Design", so reading the first card-title would have
           // reported "Design" and passed for the wrong reason.
-          title: document.querySelector('header h1')?.innerText ?? '',
+          title: document.querySelector('[data-slot="studio-title"]')?.innerText ?? '',
           active: card ? card.className.includes('ring-ring') : false,
           url: location.search,
         });
@@ -1500,6 +1741,153 @@ async function main() {
       `Centred → ${nudged.moved.readout} (data-offset-x=${nudged.moved.x}) → ${nudged.back.readout}`,
     );
 
+    /* ---- and how big: a corner handle, and the size control ---- */
+
+    // The handle is a pointer gesture, so it is driven as one. `element.click()`
+    // would bypass exactly the arithmetic under test. The drag is pushed 1.5×
+    // farther from the mark's centre along the same diagonal, so the scale it
+    // should produce is 1.5 — a number the geometry predicts rather than one this
+    // check reads back and compares to itself.
+    const resize = JSON.parse(
+      await cdp.evaluate(`(() => {
+        const canvas = document.querySelector('[data-slot="canvas"]');
+        const c = canvas.getBoundingClientRect();
+        const handle = document.querySelector('[data-slot="mark-handle"][data-corner="se"]');
+        const h = handle.getBoundingClientRect();
+        const from = { x: Math.round(h.left + h.width / 2), y: Math.round(h.top + h.height / 2) };
+        const cx = c.left + c.width / 2;
+        const cy = c.top + c.height / 2;
+        return JSON.stringify({
+          from,
+          to: {
+            x: Math.round(cx + (from.x - cx) * 1.5),
+            y: Math.round(cy + (from.y - cy) * 1.5),
+          },
+          before: canvas.dataset.scale,
+          frame: !!document.querySelector('[data-slot="mark-frame"]'),
+          handles: document.querySelectorAll('[data-slot="mark-handle"]').length,
+        });
+      })()`),
+    );
+
+    const mouse = (type, x, y) =>
+      cdp.send("Input.dispatchMouseEvent", {
+        type,
+        x,
+        y,
+        button: "left",
+        buttons: type === "mouseReleased" ? 0 : 1,
+        clickCount: 1,
+      });
+
+    await mouse("mouseMoved", resize.from.x, resize.from.y);
+    await mouse("mousePressed", resize.from.x, resize.from.y);
+    // In steps, because a real drag is a path and not a jump: the arithmetic has
+    // to hold on every move event, not only at the destination.
+    for (const t of [0.34, 0.67, 1]) {
+      await mouse(
+        "mouseMoved",
+        Math.round(resize.from.x + (resize.to.x - resize.from.x) * t),
+        Math.round(resize.from.y + (resize.to.y - resize.from.y) * t),
+      );
+    }
+    await mouse("mouseReleased", resize.to.x, resize.to.y);
+    await sleep(250);
+
+    const dragged = JSON.parse(
+      await cdp.evaluate(`(() => {
+        const canvas = document.querySelector('[data-slot="canvas"]');
+        const c = canvas.getBoundingClientRect();
+        const f = document.querySelector('[data-slot="mark-frame"]').getBoundingClientRect();
+        const readout = document.querySelector('[data-slot="size-readout"]').textContent.trim();
+        return JSON.stringify({
+          scale: canvas.dataset.scale,
+          // Where the frame actually landed, as a canvas fraction. The claim is
+          // that the frame tracks the artwork, not merely that a number changed.
+          half: +(f.width / c.width / 2).toFixed(3),
+          centre: +((f.left - c.left + f.width / 2) / c.width).toFixed(3),
+          share: (readout.match(/(\\d+)% of canvas/) ?? [])[1] ?? '',
+          readout,
+        });
+      })()`),
+    );
+
+    record(
+      "a corner handle resizes the logo, and the frame tracks it",
+      resize.frame &&
+        resize.handles === 4 &&
+        Math.abs(Number(dragged.scale) - 1.5) < 0.03 &&
+        // MARK_BOX is 0.3, so a 1.5× logo's frame is 45% of the canvas either
+        // side of the centre — the absolute value, not a ratio between the two
+        // numbers this run happened to produce.
+        Math.abs(dragged.half - 0.45) < 0.01 &&
+        Math.abs(dragged.centre - 0.5) < 0.005 &&
+        dragged.share === "90",
+      `${resize.before} → ${dragged.scale}, frame half ${dragged.half} at centre ${dragged.centre} · "${dragged.readout}"`,
+    );
+
+    // The recipes are the same write as the drag, so they have to leave no chip
+    // pressed once the value moves off them — and the fill scale is where the
+    // resize is felt as a *consequence*: a mark that spans the canvas has no room
+    // left to move, so the position pad goes off rather than clamping silently.
+    const sized = JSON.parse(
+      await cdp.evaluate(`(async () => {
+        const settle = () => new Promise((r) => setTimeout(r, 130));
+        // Matched case-insensitively: the chip carries Tailwind's capitalize
+        // utility, and innerText reports the rendered text — so "Fill canvas"
+        // comes back as "Fill Canvas" and an exact match would find nothing.
+        const chip = (label) =>
+          [...document.querySelectorAll('[data-slot="size-recipes"] button')]
+            .find((b) => b.innerText.trim().toLowerCase() === label.toLowerCase());
+        const read = () => ({
+          scale: document.querySelector('[data-slot="canvas"]').dataset.scale,
+          readout: document.querySelector('[data-slot="size-readout"]').textContent.trim(),
+          position: document.querySelector('[data-slot="position-readout"]').textContent.trim(),
+          nudgeOff: [...document.querySelectorAll('[data-slot="position-nudge"]')].every((b) => b.disabled),
+        });
+        chip('fill canvas').click();
+        await settle();
+        const filled = read();
+        chip('default').click();
+        await settle();
+        const back = read();
+        return JSON.stringify({ filled, back });
+      })()`),
+    );
+
+    record(
+      "the size recipes set the scale, and filling the canvas pins the logo",
+      Number(sized.filled.scale) > 1.66 &&
+        /100% of canvas/.test(sized.filled.readout) &&
+        sized.filled.position === "Pinned" &&
+        sized.filled.nudgeOff &&
+        sized.back.scale === "1.000" &&
+        /60% of canvas/.test(sized.back.readout) &&
+        sized.back.position === "Centred" &&
+        !sized.back.nudgeOff,
+      `Fill → ${sized.filled.scale} "${sized.filled.readout}" (${sized.filled.position}) · ` +
+        `Default → ${sized.back.scale} "${sized.back.readout}" (${sized.back.position})`,
+    );
+
+    // The size has to survive a reload with the rest of the artwork, or a user who
+    // resized and came back would find their logo silently at the authored size.
+    const sizedChip = (label) =>
+      `[...document.querySelectorAll('[data-slot="size-recipes"] button')].find((b) => b.innerText.trim().toLowerCase() === '${label.toLowerCase()}')`;
+    await cdp.evaluate(`(${sizedChip("Wide")}).click()`);
+    await sleep(200);
+    await cdp.goto(`${BASE}/studio`);
+    await sleep(900);
+    const keptScale = await cdp.evaluate(
+      `document.querySelector('[data-slot="canvas"]')?.dataset.scale ?? ''`,
+    );
+    record(
+      "a resized logo comes back at its size",
+      Math.abs(Number(keptScale) - 1.3) < 0.005,
+      `"Wide" (1.30) → reload → ${keptScale}`,
+    );
+    await cdp.evaluate(`(${sizedChip("Default")}).click()`);
+    await sleep(200);
+
     /* ---- refusals cost nothing ---- */
 
     // Driven through the same file input as the success path. A file input's
@@ -1584,7 +1972,7 @@ async function main() {
       await cdp.evaluate(`(() => {
         const svg = document.querySelector('[data-slot="canvas"] svg');
         return JSON.stringify({
-          title: document.querySelector('header h1')?.innerText ?? '',
+          title: document.querySelector('[data-slot="studio-title"]')?.innerText ?? '',
           name: document.querySelector('[data-slot="artwork-name"]')?.innerText ?? '',
           image: !!svg.querySelector('image'),
           stored: !!localStorage.getItem('puff-nonai-mark'),
@@ -1623,7 +2011,7 @@ async function main() {
       await cdp.evaluate(`(() => {
         const svg = document.querySelector('[data-slot="canvas"] svg');
         return JSON.stringify({
-          title: document.querySelector('header h1')?.innerText ?? '',
+          title: document.querySelector('[data-slot="studio-title"]')?.innerText ?? '',
           // The fallback is the library's first look, read from the gallery rather
           // than typed here — the names get rewritten, and a hardcoded one made this
           // check fail while the record was being dropped exactly as it should be.

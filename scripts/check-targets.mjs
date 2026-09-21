@@ -13,7 +13,10 @@ import { pngDataUrl } from "./test-image.mjs";
  *     so the artwork has to fit a different limit per target. Every look in the
  *     library is measured with an upload attached, at the fitted scale, against
  *     the target's limit — so retuning a look or the fit maths cannot quietly
- *     push a logo past Android's 66/108 circle.
+ *     push a logo past Android's 66/108 circle. Each look is measured at both
+ *     ends of the resize range as well, because a logo the user has enlarged is
+ *     the case most likely to reach an edge and the one a fit tuned only for the
+ *     default box would get wrong.
  *  2. **Alpha.** iOS and the App Store reject a 1024 master that carries an alpha
  *     channel, so a square master must be opaque right into its corners — while
  *     the rounded preview beside it must stay transparent outside the curve.
@@ -62,9 +65,8 @@ let edge;
 try {
   const { renderSvg } = await vite.ssrLoadModule("/lib/engine/render.ts");
   const { TEMPLATES } = await vite.ssrLoadModule("/lib/templates.ts");
-  const { EXPORT_TARGETS, MAX_OFFSET_UNITS, fitFor } = await vite.ssrLoadModule(
-    "/lib/engine/targets.ts",
-  );
+  const { EXPORT_TARGETS, MAX_MARK_SCALE, MAX_OFFSET_UNITS, MIN_MARK_SCALE, fitFor } =
+    await vite.ssrLoadModule("/lib/engine/targets.ts");
 
   /**
    * The upload every look is measured with.
@@ -89,23 +91,31 @@ try {
     const limit = target.safeBox ?? target.safeCircle;
     const shape = target.safeBox ? "box" : "circle";
     for (const template of TEMPLATES) {
-      // Three cases per look, and each one is a term the fit has to make room
-      // for: the look's own finish, the heaviest shadow it could be moved to, and
-      // the mark pushed as far off centre as the studio allows. The shadow and the
-      // offset are the two terms the fit cannot shrink away, so both are pushed to
-      // their worst case here rather than trusted to a recipe.
+      // Five cases per look, and each one is a term the fit has to make room for:
+      // the look's own finish, the heaviest shadow it could be moved to, the mark
+      // pushed as far off centre as the studio allows, and then that same worst
+      // case at both ends of the resize range. The shadow, the offset and the size
+      // are the three terms the fit cannot shrink away, so all three are pushed to
+      // their extreme here rather than trusted to a recipe — and the fill scale is
+      // the single most demanding document this studio can produce.
       const corner = { x: MAX_OFFSET_UNITS, y: MAX_OFFSET_UNITS };
-      for (const [label, finish, offset] of [
-        ["own", template.direction.finish, undefined],
-        [`shadow 1`, { ...template.direction.finish, shadow: 1 }, undefined],
-        ["corner", { ...template.direction.finish, shadow: 1 }, corner],
+      for (const [label, finish, offset, scale] of [
+        ["own", template.direction.finish, undefined, undefined],
+        [`shadow 1`, { ...template.direction.finish, shadow: 1 }, undefined, undefined],
+        ["corner", { ...template.direction.finish, shadow: 1 }, corner, undefined],
+        ["fill", { ...template.direction.finish, shadow: 1 }, corner, MAX_MARK_SCALE],
+        ["tiny", { ...template.direction.finish, shadow: 1 }, corner, MIN_MARK_SCALE],
       ]) {
         const direction = {
           ...template.direction,
           finish,
-          artwork: { ...upload, ...(offset ? { offset } : {}) },
+          artwork: {
+            ...upload,
+            ...(offset ? { offset } : {}),
+            ...(scale ? { scale } : {}),
+          },
         };
-        const fit = fitFor(target, finish, offset);
+        const fit = fitFor(target, finish, offset, scale);
         const uid = `s${target.id.replace(/[^a-z]/gi, "")}${template.id.replace(/[^a-z0-9]/gi, "")}${label.replace(/[^a-z0-9]/gi, "")}`;
         sweep.push({
           target: target.id,

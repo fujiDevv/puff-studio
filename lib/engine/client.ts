@@ -30,11 +30,20 @@ export function downloadText(filename: string, text: string, type: string) {
  * so those stay square on purpose. The export panel says so beside the radius.
  */
 export function downloadSvg(direction: Direction, filename: string) {
-  downloadText(
-    filename,
-    renderSvg(direction, { corners: "rounded", radius: direction.radius }),
-    "image/svg+xml",
-  );
+  downloadText(filename, svgMaster(direction), "image/svg+xml");
+}
+
+/**
+ * The vector master as a string, so the download and the clipboard share one
+ * definition of it.
+ *
+ * They used to spell the render out separately — the same two options written
+ * twice — which meant the copied file and the downloaded one could drift apart
+ * without either looking wrong on its own. Whoever pastes the SVG and whoever
+ * opens the file are asking for the same artefact, so they get the same call.
+ */
+export function svgMaster(direction: Direction): string {
+  return renderSvg(direction, { corners: "rounded", radius: direction.radius });
 }
 
 /**
@@ -97,7 +106,17 @@ export function rasterizeTarget(
     // applies its own corners. See `EXPORT_TARGETS`.
     corners: "square",
     layers: target.layers,
-    fit: fitFor(target, direction.finish),
+    // The fit has to see the artwork's *size and position*, not just the finish:
+    // a logo that has been moved toward a corner, or enlarged to near the canvas
+    // edge, reaches farther from the centre and needs a smaller export scale to
+    // stay inside the platform's mask. Passing only the finish was a real bug —
+    // the preview fitted a moved logo and the downloaded PNG did not.
+    fit: fitFor(
+      target,
+      direction.finish,
+      direction.artwork?.offset,
+      direction.artwork?.scale,
+    ),
   });
 }
 

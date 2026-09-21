@@ -86,6 +86,18 @@ export interface MarkArtwork {
   height: number;
   /** Where the mark sits relative to the canvas centre. Absent means centred. */
   offset?: MarkOffset;
+  /**
+   * How big the artwork is drawn, as a multiple of the default box. Absent
+   * means `1`, the authored size.
+   *
+   * A multiplier rather than a size in canvas units, because the box is what
+   * every extent in `targets.ts` is derived from: scaling the box scales the
+   * reach, and the fit that keeps the artwork inside a platform's mask then has
+   * one number to read. It is clamped to `MAX_MARK_SCALE`, the point at which a
+   * square image fills the canvas exactly — past that there is nothing left to
+   * zoom into, only artwork the export would have to throw away.
+   */
+  scale?: number;
 }
 
 export interface Direction {

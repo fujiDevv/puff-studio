@@ -25,9 +25,29 @@ a **hand-authored library of looks** plus your own artwork. A look *is* a
 
 ## The shell
 
-One screen, three parts: a **sidebar** holding the template library, the
-**canvas**, and an **inspector** rail. The sidebar scrolls independently of the
-canvas, so the thing you are designing never scrolls away while you browse.
+One screen, **two columns**, split the way a design tool splits them: everything
+you *look at* on the left, everything you *change* on the right.
+
+| | |
+| --- | --- |
+| **Canvas** (left) | The whole side, the whole height. No card, no mat, no inner scroll — the plate is the largest square that fits, and the surface around it belongs to the canvas |
+| **Editor** (right) | It is *complete*: the look library, the three design tabs, the measurements, and the way out. One scrolling panel rather than three regions |
+
+It used to be three regions — a 284px look rail, a scrolling middle column with the
+plate in a card above a Design card, and the export panel below that. Three regions
+for two things. The header went with them, because a title bar across the top of a
+stage is exactly the chrome a full-bleed canvas is trying to get rid of; the title,
+the export button and the theme switch now belong to the editor.
+
+Below `md` the two columns **stack**: the canvas keeps a fixed share of the height
+and the editor takes the rest, so a phone gets the same two surfaces one above the
+other rather than a shrunken desktop.
+
+**Looks is a collapsible section**, not a rail, and it is open by default —
+collapsing is the opt-in, not the resting state, because a library nobody can find
+is worse than one that takes a row of height. The summary keeps saying *which look
+you are working from* while the list is closed, so collapsing hides the scrolling
+and nothing else.
 
 - **Infinite scroll.** The list starts with a screenful and appends another batch
   each time a sentinel at the bottom comes into view, then stops honestly at the
@@ -38,35 +58,67 @@ canvas, so the thing you are designing never scrolls away while you browse.
   paging and the scroll position, so a narrower result set cannot open already
   "finished".
 - **Shuffle** loads a different look at random and never repeats the current one.
+  **Reset** reloads the current look, discarding your edits, and is offered only
+  while there is something to discard. Both live in the Looks section rather than
+  the header: they are statements about the look, not about the document.
 
 ## The canvas
 
-The plate is shown **uncropped, on a mat, with a hairline marking where the
-canvas ends**. That last part matters more than it sounds: a full-bleed plate has
-no visible edge of its own, so without the mat you cannot tell whether the
+It is a **stage**, not a card. A 1024-unit canvas is what this app is about, and it
+used to be shown at a fixed 360px wide inside four layers of chrome — a plate in a
+mat in a card in a column — so the design was judged through a keyhole. The stage
+fills the column instead, and the plate is as large as fits: **732×732** in a
+1280×900 window, from 360 before.
+
+Being the largest square that fits *both* axes is the whole layout problem, and
+`aspect-ratio` cannot express it on its own — a square capped by `max-height` stops
+being square. The stage is a size container and the frame inside it is
+`min(100%, 100cqh − label)`: one declaration, correct at every window size, with no
+measured pixels and no resize listener. `check:browser` asserts the result as
+*geometry* — square, inside the stage on every edge, below the view bar and above
+the status bar — because a plate that fits and a plate that merely did not overflow
+look the same in a screenshot.
+
+The plate is shown **uncropped, with a shadow and a hairline boundary**, and the
+frame is named above it the way a design tool names an artboard: the title, and
+`1024 × 1024`. That last part matters more than it sounds — a full-bleed plate has
+no visible edge of its own, so without the boundary you cannot tell whether the
 artwork stops short of the canvas or the canvas stops at the artwork.
+
+Three bars, split by what they are *about*:
+
+| Bar | What it holds |
+| --- | --- |
+| **View** (top) | How the plate is *shown*: its corners, and which platform's safe area is drawn over it. Nothing here is saved, exported, or part of the file |
+| **Status** (bottom) | What the gesture you are about to make will do, and the **Preview** toggle |
+| **Preview** | The icon at 180 / 120 / 60px, docked above the status bar — the sizes it is actually judged at |
 
 | Control | What it does |
 | --- | --- |
 | **Canvas** | The plate exactly as it is exported — full-bleed, square, nothing clipped |
 | **Rounded** | The same plate wearing the radius you set, which is the shape a home screen gives it |
 | **Safe area** | Draws a target's mask *and* applies the fit the export will |
-| **Size strip** | The icon at 180 / 120 / 60px, because an icon is judged on a home screen, not at 360px |
+| **Export** (header) | Opens the export panel — the file set, and the SVG copy |
+| **Logo frame** | The logo's own box, with a corner handle on each corner. Drag the box to move the logo, drag a handle to resize it |
+| **Preview** | Toggles the 180 / 120 / 60px samples. Off until asked for: three rendered plates are worth the height when you are judging legibility and are clutter when you are placing a logo |
 
 ## The editor
 
-The design panel is three tabs over one document, and the tabs are the split a
-`Direction` already has — a *plate* with an *artwork* on it:
+Four sections stacked in one scrolling column: **Looks** (collapsible), **Design**,
+**Measurements**, and the one-line statement of what the app is.
+
+`Design` is three tabs over one document, and the tabs are the split a `Direction`
+already has — a *plate* with an *artwork* on it:
 
 | Tab | What it holds |
 | --- | --- |
 | **Look** | 12 palettes, 2 colour pickers (field and field 2), 4 field modes — solid, linear, radial, glow — and the corner radius with its five recipes |
-| **Logo** | Your own artwork, and where it sits |
+| **Logo** | Your own artwork, how big it is, and where it sits |
 | **Finish** | Five finish recipes, then shadow and grain as exact values |
 
 Each trigger carries the one number worth seeing without opening it — the radius,
-or whether artwork is loaded — which is the question the tab bar can answer for
-free. The panels are all **kept mounted**: they hold live inputs, and unmounting
+or whether a logo is loaded and how big it is — which is the question the tab bar
+can answer for free. The panels are all **kept mounted**: they hold live inputs, and unmounting
 the one you just left would throw away its scroll position for no gain when the
 values live in the store anyway.
 
@@ -75,10 +127,18 @@ once there are enough controls. The order was the order they happened to be writ
 in rather than anything meaningful, and everything was always on screen, so nothing
 was emphasised.
 
+**Measurements** is the document's five numbers — the canvas, the radius, how big
+the logo is drawn, how far the artwork reaches, and the scale the export will
+apply. They used to sit under the plate, where they competed with it for height and
+were most useful exactly when the plate was smallest; they belong with the rest of
+the document's state rather than with the view.
+
 Every readout states a real number rather than a position on a slider. The radius
 is measured in the 1,024-unit canvas like every other measurement here, so it reads
 in whole units — and 218.18, the default, is `docs/Frame.svg`'s own corner radius
-rather than a round number somebody liked.
+rather than a round number somebody liked. `0.696` is a fact where "slightly
+reduced" is not, which is why the fit is highlighted and explained only when it is
+actually doing something: a readout that shouts at 1.000 is noise.
 
 The recipes are the same numbers the looks are built from, offered as individual
 moves: five corners from `Tight` to `Pill`, five finishes from `Flat` to `Heavy`.
@@ -114,7 +174,34 @@ not have. A logo pushed toward an edge is not cropped: every export is fitted so
 the whole mark survives that platform's mask, which means moving it outward shrinks
 the fitted export rather than clipping it.
 
-**The artwork survives a reload**, along with the look you were working from
+**Resizing** works the way a design canvas does, and then states the number. The
+logo's box is drawn on the plate with a handle on each corner; dragging one
+resizes about the logo's *own* centre, so a mark grows in place rather than sliding
+as it grows. The arithmetic behind that is short — the distance from the logo's
+centre to the handle **is** half the box diagonal, and `half = MARK_BOX × scale`
+turns it back into a size — so there is no ratio against the drag's starting state
+and therefore no drift: a corner dragged back to where it began returns the exact
+scale it began at. All four corners share one handler, because a square box's
+corners are equidistant from its middle.
+
+The gesture is paired with `Logo size` in the panel, for the same reason the drag
+is paired with the nudge pad: a gesture has no readout and no way to type a value.
+There the size is stated as a share of the canvas — `1.00×` is 60% of it, `Fill
+canvas` is 100% — because that is the number a designer is actually deciding. The
+recipes (`Compact` · `Default` · `Wide` · `Fill canvas`) are the same
+`setArtworkScale` write the slider and the handles use, so none of them stays
+pressed once the value moves off it.
+
+Resizing has one consequence, and the panel says it rather than letting it be
+discovered: **a bigger logo has less room to move.** The box has to stay on the
+canvas, so the travel limit is `½ − MARK_BOX × scale` — at the default size 204.8
+units, at `Fill canvas` **zero**. There the mark is pinned to the middle and the
+position pad goes off with a reason rather than clamping every press to nothing.
+The scale is clamped on the way in and again in the renderer, because a document
+can also arrive from `localStorage`, which anyone can edit.
+
+**The artwork survives a reload** — including its size — along with the look you
+were working from
 (`lib/mark-session.ts`). Only those two things: a `Direction` hydrated during
 module evaluation would run on the server-rendered pass, and the markup would then
 depend on state the server cannot see. This record is applied in an effect *after*
@@ -160,12 +247,42 @@ Four targets plus the vector master, each fitted to its own safe area:
 | `-play-512.png` | 512² | Opaque square, same 80% margin |
 | `-android-fg-432.png` | 432² | Transparent artwork layer, inside the guaranteed central 66dp circle |
 | `-android-bg-432.png` | 432² | Opaque full-bleed field layer, no rim (the launcher's mask is not knowable) |
-| `-icon.svg` | vector | The square master |
+| `-icon.svg` | vector | The **design** master, corners included — it goes to a designer or a build, not to a platform |
+
+It lives in the **header**, behind one button, rather than as a card under the
+Design panel. A download is a statement about the whole document rather than
+about any one lever beside it, and "where do I get the files" should not be
+answered by scrolling to the bottom of a column. The panel is portaled out of the
+page, so the Design column is left to the Design card alone.
 
 The whole set downloads at once, **or one target at a time** from the arrow on
 its row — a browser asked for five downloads at once will often prompt about it,
 and a developer who only wants the vector should not have to take the PNGs too.
-**Copy SVG** puts the square master on the clipboard for the same reason.
+**Copy SVG** puts the vector master on the clipboard for the same reason.
+
+### The copy is written for importers, not only for browsers
+
+The SVG is emitted with **both** forms of every reference — `href` and the older
+`xlink:href` — and declares `xmlns:xlink` on the root.
+
+That looks like a belt-and-braces no-op, and it was: SVG 2 made the plain `href`
+correct, so Chrome, Safari and Firefox all render a file that has only that, and
+the preview, every PNG and `check:targets` were all perfectly happy. **Importers
+are not caught up.** Paste it into a design tool that resolves `xlink:href` only,
+and there is no error to read: an `<image>` with an unresolvable reference draws
+*nothing*, so the plate arrived with the logo simply missing from it. A valid SVG,
+complete-looking markup, and a hole where the artwork was — which is why it took
+a paste into another tool to find, and why nothing here caught it for as long as
+it shipped.
+
+The namespace is declared unconditionally. An unused declaration costs a few
+bytes, and a condition that has to stay in step with every `<use>` in
+`render.ts` is a bug waiting to happen.
+
+**Copy SVG and the SVG download are one function** (`svgMaster` in
+`lib/engine/client.ts`). They had been spelling the same render out twice, which
+is how the copied file and the downloaded one can drift apart without either
+looking wrong on its own.
 
 Selecting a guide (iOS / Android) draws that platform's safe area over the
 canvas **and** applies the same fit the export uses, with the scale printed
@@ -176,9 +293,9 @@ artwork visibly ignores.
 
 ```
 pnpm typecheck        tsc --noEmit
-pnpm test             46 engine, look and sample tests
+pnpm test             50 engine, look and sample tests
 pnpm check:targets    10 checks: the reference edge, alpha and safe areas
-pnpm check:browser    59 checks in headless Chrome (needs: pnpm dev)
+pnpm check:browser    69 checks in headless Chrome (needs: pnpm dev)
 pnpm build            Worker output
 ```
 
@@ -236,10 +353,14 @@ A few that exist because the failure they catch is invisible in source:
   `data:image/svg+xml` URLs — so every `%` inside one would be encoded a second
   time, the nested image would fail to load, and the diff would report exactly zero
   for a mark that is in fact painted.
-- **`scrolling the list pages the whole library in`** (browser). Drives the real
-  scroll rather than faking it — the only way to check the observer is attached
-  to the right root, which is the mistake that would leave a list that never
-  grows.
+- **`the look library scrolls in place inside the editor`** and
+  **`scrolling the list pages the whole library in`** (browser). The list has to own
+  its scrolling — if it overflowed the editor instead, the observer would be
+  watching the wrong root and the list would never grow — so the check drives the
+  **real** scroll, because that is the only thing that proves the observer is
+  attached to the right element. The first is what remains of "the studio is a
+  sidebar shell": the section moved into the editor, and the claim about the scroll
+  container did not.
 - **`the studio theme switcher really changes the studio`** (browser). A flipped
   class proves nothing; the check compares the rendered colour's own lightness in
   both directions.
@@ -249,10 +370,58 @@ A few that exist because the failure they catch is invisible in source:
   that lit up without writing anything would look identical in a screenshot. The
   recipe is clicked and the canvas's own `data-radius` is read — the document rather
   than the label beside it.
+- **`the studio is two columns: the canvas, and the editor beside it`** (browser).
+  Asserted as a *relationship* between the two rects rather than as two presences —
+  the point of the change is that they no longer sit above one another — plus the
+  editor's height against its parent, because "full height" is the claim a `flex-1`
+  in the wrong place quietly voids.
+- **`below the breakpoint the two columns stack instead`** (browser). The same two
+  rects at an emulated 414px, where a two-column layout actually breaks. Worth its
+  own check because a Tailwind breakpoint that compiles to nothing looks exactly
+  like one that works — and it caught a real one: `clearDeviceMetricsOverride`
+  *removes* an override rather than restoring the previous one, so "undoing" the
+  emulation dropped the run to headless Chrome's real 756×469 window and every
+  check after it measured the mobile layout while claiming to measure the desktop
+  one. The suite's viewport is a named constant now, and both callers use it.
+- **`the canvas is the largest square that fits the whole column`** (browser).
+  Geometry, not style: the plate's width against its height, its gaps to the stage
+  on all four edges, and its position between the two bars. A plate inside a Card
+  would still measure square, so the claim being tested is specifically "as large as
+  fits", which `aspect-ratio` cannot express on its own — a square capped by
+  `max-height` stops being square.
+- **`the Preview toggle shows the icon at real home-screen sizes`** (browser).
+  Three shapes of the same claim in one check: nothing before the click (the strip
+  is off until asked for), three samples at 180/120/60px with their measured widths
+  agreeing with their declared ones, docked above the status bar rather than
+  floating over the plate — and *nothing again* after a second click, because a
+  toggle that only opens is a button.
 - **`the position pad nudges in exact steps, and offers the way back`** (browser).
   The pad exists beside the drag because each press is an exact, stated distance, so
   the check reads the canvas's `data-offset-*` rather than however far a pointer
   happened to move.
+- **`a corner handle resizes the logo, and the frame tracks it`** (browser). Driven
+  with real mouse events, in steps — `element.click()` would bypass exactly the
+  arithmetic under test, and a single jump is one move event where a real drag is a
+  path. The drag is pushed 1.5× farther from the logo's centre, so the scale it must
+  produce is 1.5: a number the geometry predicts rather than one the check reads
+  back and compares against itself. It also asserts where the frame *landed* — half
+  the box at 45% of the canvas, still centred — and the readout it implies, so a
+  frame that merely tracked a changed number would fail. Its companion,
+  **`the size recipes set the scale, and filling the canvas pins the logo`**, is the
+  one that covers the consequence: at the fill scale the position pad is off and
+  reads `Pinned`.
+- **`an enlarged mark is fitted harder, so the export still contains it`** (engine)
+  and **`every document survives every export target`** (engine + targets). The
+  three terms the fit cannot shrink away are the shadow, the offset, and now the
+  size — so `check:targets` measures every look at *both ends of the resize range*,
+  at the worst offset, with the heaviest shadow. The fill scale is the single most
+  demanding document the studio can produce, and it is measured against the real
+  pixels of every platform mask.
+- **`the scale is clamped, and at the fill scale the mark is pinned to the middle`**
+  (engine). It asserts the defining property rather than a number — a square image
+  at `MAX_MARK_SCALE` touches all four edges, so travel is exactly zero — and then
+  renders a hand-edited `scale: 500` to prove the *renderer* clamps too, not only
+  the studio.
 - **`search narrows the library to what it can match`** (browser). The term is read
   off the first card rather than typed into the check: the assertion it replaces
   kept looking for `blob` long after every look had been renamed, so it failed while
@@ -262,10 +431,26 @@ A few that exist because the failure they catch is invisible in source:
   no matter what; the check reads the compiled CSS instead. A Tailwind variant
   this version cannot parse compiles to nothing *silently*, which is a trap that
   has already bitten this codebase once.
-- **`Copy SVG puts the square master on the clipboard`** (browser). Clicked with
-  a real mouse event, not `element.click()`: a clipboard write needs transient
-  user activation, and a synthetic click is not trusted input — so the lazy
-  version would have proved only that the browser refuses untrusted callers.
+- **`Copy SVG puts the design master, logo included, on the clipboard`** (browser).
+  Clicked with a real mouse event, not `element.click()`: a clipboard write needs
+  transient user activation, and a synthetic click is not trusted input — so the
+  lazy version would have proved only that the browser refuses untrusted callers.
+  It loads an artwork **first**, because the check it replaces ran on an empty
+  plate — where a clipboard that dropped the logo and one that was correctly empty
+  look exactly alike — and it asserts the copied bytes contain the very href the
+  canvas is drawing, plus that the corners survived.
+- **`the copied SVG is readable by an importer, not only by a browser`** (browser)
+  and **`every reference is readable by an importer, not only by a browser`**
+  (engine). Both count the `xlink:href` forms, because emitting *one* form is
+  exactly what shipped. The unit test also asserts the namespace is declared: an
+  unprefixed `href` is merely old, but a prefixed attribute with no declaration is
+  invalid XML — the file would be rejected outright rather than rendering without
+  its logo.
+- **`the export panel hangs off a button in the header`** (browser). A closed
+  popover is *unmounted* rather than hidden, so this asserts the panel is absent
+  before the click and present after it, that the trigger reports `aria-expanded`,
+  and that the panel is no longer inside `main` — the three ways "it moved to the
+  header" could be only half true.
 - **`the artwork is painted, not merely defined`** (engine) and **`the uploaded
   artwork is drawn, not only blurred`** (browser). The mark group lives in the
   document's definitions so its shadow passes can reuse it, and the custom-mark
@@ -311,15 +496,21 @@ A few that exist because the failure they catch is invisible in source:
 
 ```
 app/page.tsx                 landing
-app/studio/page.tsx          the studio shell (?template=<id> preselects)
+app/studio/page.tsx          the two-column studio (?template=<id> preselects)
 components/marquee.tsx       the looping track, shared by the wall and the hero
 components/marketing/        landing sections, incl. the wall of finished plates
+components/studio/preview.tsx the canvas: stage, artboard, view/status/Preview bars
+components/studio/looks-panel.tsx the collapsible look library + shuffle/reset
+components/studio/gallery.tsx the paging look list
+components/studio/readouts.tsx  the document's five numbers
 components/studio/editor.tsx the three-tab design panel (Look · Logo · Finish)
 components/studio/look.tsx   palettes, field modes, the radius and its recipes
 components/studio/finish.tsx finish recipes, shadow and grain
 components/studio/artwork.tsx  the upload control (drops a file, never a URL)
+components/studio/size.tsx     the logo's size: readout, recipes, slider
 components/studio/position.tsx the offset: readout, nudge pad, recentre
-components/studio/           the sidebar, gallery, preview and export panel
+components/studio/export-panel.tsx the file set, inside the header's popover
+components/ui/popover.tsx    the anchored panel primitive (export)
 lib/templates.ts             the look library — this app's "Stage A"
 lib/sample-marks.ts          the landing page's sample logos, as embedded vectors
 lib/store.ts                 the editing document
@@ -346,7 +537,15 @@ without a package boundary between them; `pnpm test` covers the copy directly.
   crop and leaves what already fits exactly as authored. The reach is a table
   rather than a measurement: `MARK_BOX` is where the artwork box sits, `MARK_CIRCLE`
   its corner, and an offset mark is measured to its *farthest* corner — so a
-  centred logo and one pushed to an edge each fit the way the export will.
+  centred logo and one pushed to an edge each fit the way the export will. The
+  size is the third term, and it multiplies the box: `markHalf` is `MARK_BOX ×
+  scale`, and everything else — the reach, the travel, the fit — is derived from
+  that one number rather than recomputed by hand in each place.
+- **Resizing cannot push a logo off the canvas, by construction.** The travel limit
+  is `½ − markHalf`, so it shrinks to exactly zero at the fill scale, where the box
+  reaches the edge. That is why a full-bleed logo is pinned to the middle instead of
+  being allowed to hang off: the limit is a statement about the file, not a slider
+  end point.
 - **The corner is in the plate's own path, not a CSS box.** Rounding the preview
   with `border-radius` would cut a corner the exported file keeps; `roundRectPath`
   draws it instead, and the four platform masters stay square — iOS and Play apply

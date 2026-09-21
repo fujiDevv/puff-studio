@@ -103,13 +103,9 @@ export function TemplateGallery({ className }: { className?: string }) {
       data-slot="template-gallery"
       className={cn("flex min-h-0 flex-col gap-3", className)}
     >
-      <div className="flex items-center justify-between gap-3 px-3">
-        <span className="text-sm font-medium">Looks</span>
-        <span className="text-[11px] text-muted-foreground">
-          {TEMPLATES.length} · all free
-        </span>
-      </div>
-
+      {/* No header row of its own. The section that holds this gallery already
+          shows the library's name and its count, and two rows saying "Looks" in
+          one column is one row too many. */}
       <div className="relative px-3">
         <IconSearch className="pointer-events-none absolute left-5.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input

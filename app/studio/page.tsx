@@ -1,24 +1,50 @@
 "use client";
 
-import { IconArrowsShuffle, IconRefresh } from "@tabler/icons-react";
+import { IconDownload } from "@tabler/icons-react";
+import Link from "next/link";
 import { useEffect } from "react";
 
+import { Logo } from "@/components/marketing/logo";
 import { Editor } from "@/components/studio/editor";
 import { ExportPanel } from "@/components/studio/export-panel";
+import { LooksPanel } from "@/components/studio/looks-panel";
 import { MarkRestore } from "@/components/studio/mark-restore";
 import { Preview } from "@/components/studio/preview";
-import { StudioSidebar } from "@/components/studio/sidebar";
+import { Readouts } from "@/components/studio/readouts";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useStudio } from "@/lib/store";
 import { TEMPLATES, templateById } from "@/lib/templates";
 
+/**
+ * The studio: two columns, and nothing else.
+ *
+ * It used to be three regions — a 284px look rail, a scrolling middle column where
+ * the plate sat in a card above a Design card, and the export panel below that.
+ * Three regions for two things: a document, and the controls for it. So there are
+ * two now, split the way a design tool splits them:
+ *
+ *  - **The canvas** takes the whole left side and the whole height. No card, no
+ *    mat, no inner scroll: the plate is the largest square that fits and the
+ *    surface around it belongs to the canvas. Everything you *look at* is here.
+ *  - **The editor** is the right column, and it is complete: the look library, the
+ *    three design tabs, the measurements, and the way out. Everything you *change*
+ *    is here, in one scrolling panel instead of distributed across the page.
+ *
+ * The header moved with it. A document title, the export button and the theme
+ * switch belong to the editor rather than to the canvas, which is what lets the
+ * canvas be full-bleed — a title bar across the top of a stage would be exactly
+ * the chrome this is getting rid of.
+ *
+ * `Looks` is collapsed in `LooksPanel`, not here, and the export panel is a
+ * popover: both are surfaces you open rather than regions that are always on
+ * screen. Between them the standing chrome is now a header row and three section
+ * labels.
+ */
 export default function StudioPage() {
   const templateId = useStudio((s) => s.templateId);
-  const direction = useStudio((s) => s.direction);
   const setTemplate = useStudio((s) => s.setTemplate);
-  const shuffle = useStudio((s) => s.shuffle);
 
   /**
    * Open a look the visitor picked from the landing page's wall.
@@ -36,10 +62,6 @@ export default function StudioPage() {
   }, [setTemplate]);
 
   const template = templateById(templateId);
-  // The document drifts from its look the moment anyone touches a control, which
-  // is the point of an editor — so "reset" is offered explicitly, and only while
-  // it would actually do something.
-  const edited = JSON.stringify(template.direction) !== JSON.stringify(direction);
 
   return (
     <div className="page-fade-in flex h-dvh flex-col overflow-hidden md:flex-row">
@@ -47,76 +69,67 @@ export default function StudioPage() {
           and keeps them saved as they change. */}
       <MarkRestore />
 
-      <StudioSidebar />
+      {/* The canvas column. A fixed share of the height on a phone, where the two
+          columns stack; the whole left side from `md` up. */}
+      <main className="flex h-[52vh] shrink-0 flex-col md:h-full md:min-h-0 md:flex-1">
+        <Preview />
+      </main>
 
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border px-3 sm:px-4">
-          <div className="flex min-w-0 items-center gap-2">
-            <h1 className="truncate font-display text-sm font-medium tracking-tight">
-              {template.name}
-            </h1>
-            {edited && (
-              <span className="hidden text-[11px] text-muted-foreground sm:inline">
-                edited
-              </span>
-            )}
-          </div>
+      <aside
+        data-slot="studio-editor"
+        className="flex min-h-0 flex-1 flex-col border-t border-border bg-sidebar md:h-full md:w-[360px] md:flex-none md:border-t-0 md:border-l"
+      >
+        <header className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
+          <Link href="/" aria-label="Puff Studio home">
+            <Logo />
+          </Link>
 
-          <div className="flex shrink-0 items-center gap-1.5">
-            <ThemeSwitcher data-slot="studio-theme" />
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={shuffle}
-              title="Load a different look at random"
-            >
-              <IconArrowsShuffle />
-              Shuffle
-            </Button>
-            <Button
-              variant="ghost"
-              size="sm"
-              disabled={!edited}
-              onClick={() => setTemplate(templateId)}
-              title={
-                edited
-                  ? "Discard your edits and reload this look"
-                  : "This look has not been edited yet"
-              }
-            >
-              <IconRefresh />
-              <span className="hidden sm:inline">Reset</span>
-            </Button>
-          </div>
+          <h1
+            data-slot="studio-title"
+            className="min-w-0 flex-1 truncate font-display text-sm font-medium tracking-tight"
+          >
+            {template.name}
+          </h1>
+
+          {/* The way out of the studio, and the only one. The file set is a
+              statement about the whole document rather than about any one lever in
+              the editor below it, so it hangs off the header as a popover. */}
+          <Popover>
+            <PopoverTrigger data-slot="export-trigger" render={<Button size="sm" />}>
+              <IconDownload />
+              <span className="hidden sm:inline">Export</span>
+            </PopoverTrigger>
+            <PopoverContent className="w-[min(92vw,25rem)]">
+              <ExportPanel />
+            </PopoverContent>
+          </Popover>
+
+          <ThemeSwitcher data-slot="studio-theme" />
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto">
-          <div className="grid items-start gap-4 p-3 sm:p-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-            <Card className="py-5">
-              <CardContent className="px-4 sm:px-5">
-                <Preview />
-              </CardContent>
-            </Card>
+        {/* The editor's own scroll, so the canvas never moves while you work. */}
+        <div
+          data-slot="studio-editor-scroll"
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        >
+          <LooksPanel />
 
-            <div className="flex flex-col gap-4">
-              <Card className="py-5">
-                <CardHeader className="px-5">
-                  <CardTitle>Design</CardTitle>
-                </CardHeader>
-                <CardContent className="px-5">
-                  <Editor />
-                </CardContent>
-              </Card>
+          <section
+            data-slot="design-section"
+            className="flex flex-col gap-3 border-b border-border px-4 py-4"
+          >
+            <span className="text-sm font-medium">Design</span>
+            <Editor />
+          </section>
 
-              <Card className="py-5">
-                <CardContent className="px-5">
-                  <ExportPanel />
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        </main>
-      </div>
+          <Readouts />
+
+          <p className="border-t border-border px-4 py-4 text-[11px] leading-snug text-muted-foreground text-pretty">
+            Free, with no account. Everything runs in this browser — your artwork is
+            never uploaded, and there is no model in the loop.
+          </p>
+        </div>
+      </aside>
     </div>
   );
 }

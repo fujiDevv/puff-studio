@@ -11,7 +11,7 @@ import type { MouseEvent } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { MAX_OFFSET_UNITS, clampOffset } from "@/lib/engine/targets";
+import { clampOffset, clampScale, markTravel, maxOffsetUnits } from "@/lib/engine/targets";
 import { useStudio } from "@/lib/store";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +27,12 @@ import { cn } from "@/lib/utils";
  * The step is stated rather than implied, and shift multiplies it, because
  * "nudge" without a number is exactly the kind of control this studio does not
  * have: every other readout in the panel is a real value in the 1024 space.
+ *
+ * How far the logo can travel is not a constant, so it is not quoted as one: it is
+ * the canvas half-width minus the box's own half-extent, and the Logo size
+ * control moves that term. A mark scaled up to fill the canvas has nowhere to go
+ * at all, which is why this panel disables itself rather than silently clamping
+ * every press to nothing.
  */
 const STEP = 8;
 const COARSE = 4;
@@ -41,9 +47,16 @@ const PAD: { dx: number; dy: number; icon: typeof IconArrowUp; label: string }[]
 export function Position({ className }: { className?: string }) {
   const artwork = useStudio((s) => s.direction.artwork);
   const setArtworkOffset = useStudio((s) => s.setArtworkOffset);
-  const offset = clampOffset(artwork?.offset);
+  const scale = clampScale(artwork?.scale);
+  const offset = clampOffset(artwork?.offset, scale);
   const moved = offset.x !== 0 || offset.y !== 0;
-  const disabled = !artwork;
+  // How far this mark can actually go, which the size decides: the box has to
+  // stay on the canvas, so enlarging it takes the movement away. At the fill
+  // scale there is none left, and a nudge button that does nothing would read as
+  // broken rather than as a consequence.
+  const travel = Math.round(maxOffsetUnits(scale));
+  const pinned = markTravel(scale) === 0;
+  const disabled = !artwork || pinned;
 
   const nudge =
     ({ dx, dy }: { dx: number; dy: number }) =>
@@ -60,11 +73,13 @@ export function Position({ className }: { className?: string }) {
           data-slot="position-readout"
           className="tabular-nums text-xs text-muted-foreground"
         >
-          {disabled
+          {!artwork
             ? "—"
             : moved
               ? `${Math.round(offset.x)}, ${Math.round(offset.y)}`
-              : "Centred"}
+              : pinned
+                ? "Pinned"
+                : "Centred"}
         </span>
       </div>
 
@@ -111,10 +126,11 @@ export function Position({ className }: { className?: string }) {
         </div>
 
         <p className="text-[11px] leading-snug text-muted-foreground text-pretty">
-          Drag the logo on the canvas, or nudge it here — {STEP} units a press,
-          shift for {STEP * COARSE}. It can travel{" "}
-          {Math.round(MAX_OFFSET_UNITS)} units from the centre before its box
-          would leave the canvas.
+          {!artwork
+            ? "Add a file first — there is nothing to place yet."
+            : pinned
+              ? "The logo fills the canvas, so it is pinned to the middle. Make it smaller to give it somewhere to go."
+              : `Drag the logo on the canvas, or nudge it here — ${STEP} units a press, shift for ${STEP * COARSE}. At this size it can travel ${travel} units from the centre before its box would leave the canvas.`}
         </p>
       </div>
     </div>
