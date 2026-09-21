@@ -5,8 +5,6 @@ import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { EXPORT_TARGETS } from "@/lib/engine/targets";
-import { BG_MODES, DEFAULT_RADIUS } from "@/lib/engine/types";
-import { PALETTES } from "@/lib/engine/palettes";
 import { TEMPLATES } from "@/lib/templates";
 
 /**
@@ -19,14 +17,14 @@ import { TEMPLATES } from "@/lib/templates";
  * is removed: every look is free, and so is every export.
  *
  * The counts come from the tables the studio reads, so this copy cannot drift
- * into over- or under-claiming.
+ * into over- or under-claiming. The feature list is three lines rather than five:
+ * the palette count and the radius each have a card in Specs above, and repeating
+ * them here was the same claim twice on one page.
  */
 const FEATURES = [
-  `${TEMPLATES.length} looks, all free — ${PALETTES.length} field palettes, ${BG_MODES.length} modes`,
-  "Your own artwork as the plate's logo — brought in as a file, never uploaded",
-  `Every palette colour and the ${DEFAULT_RADIUS} corner radius, editable by the number`,
+  `${TEMPLATES.length} looks, all free`,
+  "Your artwork stays on your machine",
   `The full export set — ${EXPORT_TARGETS.length} targets plus the SVG master`,
-  "iOS and Android safe-area guides with exact fits",
 ];
 
 export function Pricing() {
@@ -34,19 +32,16 @@ export function Pricing() {
     <section id="free" className="mx-auto w-full max-w-4xl px-6 py-20 sm:py-24">
       <div className="flex max-w-2xl flex-col gap-3">
         <h2 className="font-display text-2xl font-[450] tracking-tight sm:text-3xl">
-          Free, and there is nothing to sign up for.
+          Free. There is nothing to sign up for.
         </h2>
         <p className="text-sm leading-6 text-muted-foreground text-pretty">
-          The whole studio runs in your browser. There is no account, no upload,
-          and no model behind it — which also means there is no per-use cost that
-          would make a paywall make sense. Your artwork stays on your machine, and
-          the files are yours either way.
+          The whole studio runs in your browser — no account, no upload, no model.
         </p>
       </div>
 
       <div className="mt-10 rounded-2xl bg-card p-6 shadow-(--custom-shadow-lifted) ring-1 ring-foreground/10">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <h3 className="text-sm font-medium">Everything, included</h3>
+          <h3 className="text-sm font-medium">Everything</h3>
           <span className="flex items-baseline gap-1">
             <span className="tabular-nums font-display text-xl font-[450]">$0</span>
             <span className="text-xs text-muted-foreground">forever</span>

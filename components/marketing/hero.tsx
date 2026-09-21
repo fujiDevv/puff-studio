@@ -19,9 +19,8 @@ import { TEMPLATES } from "@/lib/templates";
  *
  * The wall shows sample *logos* on the looks, not the bare looks: a plate is a
  * surface, and a surface with nothing on it cannot say whether a mark will read
- * on it. The caption under it matters as much as the tiles — six of these sit on
- * a page whose whole promise is that the studio ships no marks at all, so it is
- * stated rather than implied.
+ * on it. The caption states that they are stand-ins rather than implying it,
+ * because the page's promise is that the studio ships no marks at all.
  */
 export function Hero() {
   return (
@@ -37,11 +36,8 @@ export function Hero() {
         </h1>
 
         <p className="max-w-xl text-base leading-7 text-muted-foreground text-pretty">
-          Bring your own logo. It sits on a plate drawn from vector geometry you
-          can edit by the number: one fixed 1,024-unit canvas, eight field
-          palettes, a corner radius measured in those same units, and the swept
-          rim and haze of the reference frame this app is built to. Pick a look,
-          move a slider, export the whole platform set.
+          Your logo on a plate you can edit by the number. Pick a look, set the
+          radius, export every size.
         </p>
 
         <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
@@ -59,8 +55,8 @@ export function Hero() {
         </div>
 
         <p className="pt-1 text-xs text-muted-foreground">
-          All {TEMPLATES.length} looks are free, with no account and no checkout.
-          Your artwork is embedded in the document and never uploaded anywhere.
+          All {TEMPLATES.length} looks are free. No account, and your artwork never
+          leaves your browser.
         </p>
       </div>
 
@@ -74,9 +70,8 @@ export function Hero() {
       </div>
 
       <p className="mx-auto mt-8 max-w-xl px-6 text-center text-xs leading-5 text-muted-foreground text-pretty">
-        {SAMPLE_MARKS.length} sample logos on {SAMPLE_SHOWCASE.length} of the
-        looks. They are stand-ins, not a library: the studio opens empty, and your
-        own file takes their place in one drop — then drags into position.
+        {SAMPLE_MARKS.length} sample logos on {SAMPLE_SHOWCASE.length} of the looks.
+        Your own file replaces one in a drop.
       </p>
 
       <dl className="mx-auto mt-12 grid max-w-lg grid-cols-3 gap-4 px-6 text-center sm:mt-14">

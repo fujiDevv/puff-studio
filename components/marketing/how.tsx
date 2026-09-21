@@ -5,24 +5,25 @@ import { TEMPLATES } from "@/lib/templates";
 /**
  * How it works — three steps, described in the studio's own terms.
  *
- * Step 2 is deliberately specific about the numbers, because "exact readouts" is
- * the claim this app is built on and a vague step would undersell it.
+ * The bodies and the asides are one line each. They used to be paragraphs
+ * explaining *why* the app behaves as it does, which is the README's job: a
+ * landing page that argues its case is a landing page nobody finishes.
  */
 const STEPS = [
   {
     title: "Add your artwork",
-    body: "SVG, PNG, WebP, or JPEG — dropped, pasted, or picked, up to 2MB. The file is read in your browser and embedded in the document, so there is no upload step, no endpoint, and nothing to retain. It is kept for your next visit and never sent anywhere.",
-    aside: "The type and the size are checked before anything is decoded.",
+    body: "SVG, PNG, WebP, or JPEG, up to 2MB. Read in your browser and embedded in the file — never uploaded.",
+    aside: "Checked before it is decoded.",
   },
   {
     title: "Design the plate",
-    body: `Choose one of ${TEMPLATES.length} looks — a field palette, a gradient mode, and a finish — then set the corner radius by the number. 218.18 is the reference frame's own radius, so the default plate is that shape unit for unit, and every value reads exactly as it lands in the file.`,
-    aside: "The rim, the haze, and the gleams are not controls: they are what makes it a plate.",
+    body: `Pick one of ${TEMPLATES.length} looks, then set the corner radius by the number.`,
+    aside: "The rim is not a control.",
   },
   {
-    title: "Check the safe area, then export",
-    body: "Turn on the iOS or Android guide and the preview is fitted exactly as the export will be, with the scale printed beside it. Then download the set: two opaque squares, both adaptive layers, and the SVG master — which is the one file that keeps your corners.",
-    aside: "The 66/108 adaptive circle is the tightest mask of the four.",
+    title: "Check and export",
+    body: "Turn on the iOS or Android guide to see the exact fit, then download the whole set.",
+    aside: "66/108 is the tightest mask.",
   },
 ];
 
@@ -32,12 +33,11 @@ export function How() {
       <div className="mx-auto w-full max-w-6xl px-6 py-20 sm:py-24">
         <div className="flex max-w-2xl flex-col gap-3">
           <h2 className="font-display text-2xl font-[450] tracking-tight sm:text-3xl">
-            Three steps, and none of them is a retry.
+            Three steps. No retrying.
           </h2>
           <p className="text-sm leading-6 text-muted-foreground text-pretty">
-            The renderer is deterministic, so the same document always produces
-            the same artwork. That is what makes an editor possible at all: if the
-            output moved on its own, no slider could be trusted.
+            The renderer is deterministic: the same document always draws the same
+            icon.
           </p>
         </div>
 

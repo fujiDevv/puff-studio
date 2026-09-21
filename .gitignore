@@ -1,5 +1,9 @@
 node_modules
 .env*
+# `wrangler secret put` writes secrets here for local dev. `.env*` above does not
+# cover this name, so a key pasted into `.dev.vars` would otherwise be committed.
+.dev.vars
+.dev.vars.*
 .next
 next-env.d.ts
 /dist/

@@ -14,6 +14,11 @@ import { TEMPLATES } from "@/lib/templates";
  * "By the number" — the levers, with the values the studio actually exposes
  * rather than adjectives. The counts are read from the engine's own tables, so a
  * palette added tomorrow changes this copy instead of leaving it claiming eight.
+ *
+ * The bodies are one line each. The detail that used to be here — how `meet`
+ * fits a wide logo, why the corner is an arc and not a superellipse — is real, but
+ * it is the README's job, and a visitor deciding whether to open the studio is not
+ * reading a spec sheet.
  */
 const CARDS = [
   {
@@ -21,28 +26,31 @@ const CARDS = [
     title: "Artwork",
     value: `${Math.round(MARK_BOX * 200)}%`,
     unit: "of canvas",
-    body: `Your own file, centred in a fixed box and never distorted: it is fitted with \`meet\`, so a wide logo touches the sides and a square one touches the corners. Every export is scaled so it survives that platform's mask.`,
+    body: "Your file, centred and never distorted.",
   },
   {
     icon: IconPaletteFilled,
     title: "Palette",
     value: `${PALETTES.length}`,
     unit: "fields",
-    body: `Saturated fields, each with a second colour and a haze that reads as air over the plate rather than a second gradient. ${BG_MODES.length} field modes — solid, linear, radial, glow — and both colours are yours to pick.`,
+    // The count stays interpolated, because this file's rule is that the copy
+    // cannot drift from the engine's tables. The mode *names* are dropped: they
+    // are one tab away in the studio, where they are clickable rather than read.
+    body: `${BG_MODES.length} field modes, and both colours are yours to pick.`,
   },
   {
     icon: IconRadiusTopRight,
     title: "Radius",
     value: `${DEFAULT_RADIUS}`,
     unit: "canvas units",
-    body: "The plate's corner, in the same 1,024-unit space as everything else, and a plain circular arc rather than a superellipse. The default is the reference frame's own radius, so the plate is that shape exactly.",
+    body: "A plain circular arc, in canvas units. The default is the reference frame's own.",
   },
   {
     icon: IconArrowsMaximize,
     title: "Export",
     value: `${EXPORT_TARGETS.length}`,
     unit: "targets",
-    body: "An opaque 1,024 square for the App Store, a 512 for Play, both Android adaptive layers, and the SVG master — each PNG fitted to its own safe area, each square because the platform masks it.",
+    body: "Each PNG fitted to its platform's safe area, plus the SVG master.",
   },
 ];
 
@@ -54,10 +62,7 @@ export function Specs() {
           {TEMPLATES.length} looks, {EXPORT_TARGETS.length} files, one canvas.
         </h2>
         <p className="text-sm leading-6 text-muted-foreground text-pretty">
-          There is no prompt field here, because a prompt would only be a
-          roundabout way of setting these values. Every control writes straight
-          into the document that gets exported, and every readout states a real
-          number rather than a position on a slider.
+          Every control writes straight into the document you export.
         </p>
       </div>
 

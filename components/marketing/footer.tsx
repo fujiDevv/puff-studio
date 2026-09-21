@@ -7,7 +7,7 @@ import { TEMPLATES } from "@/lib/templates";
 
 const LINKS = [
   { href: "/studio", label: "Studio" },
-  { href: "#templates", label: "Templates" },
+  { href: "#templates", label: "Looks" },
   { href: "#pricing", label: "Pricing" },
 ];
 
@@ -18,9 +18,8 @@ export function Footer() {
         <div className="flex flex-col gap-2">
           <Logo />
           <p className="max-w-sm text-xs leading-5 text-muted-foreground text-pretty">
-            {TEMPLATES.length} templates, {EXPORT_TARGETS.length} export targets,
-            one fixed 1,024-unit canvas. Everything is rendered locally — no
-            account, no upload, nothing to wait for.
+            {TEMPLATES.length} looks, {EXPORT_TARGETS.length} export targets, one
+            canvas.
           </p>
         </div>
 
